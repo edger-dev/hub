@@ -1,0 +1,13 @@
+# Rust workspace tasks (from the jig rust jig). Project-specific tasks go below.
+
+[tasks.check]
+run = "cargo check --workspace"
+description = "Type-check workspace"
+
+[tasks.fmt]
+run = "cargo fmt --all"
+description = "Format all Rust code"
+
+[tasks.bacon-claude-diagnostics]
+run = "bacon claude-diagnostics"
+description = "⭐ Run bacon background checker (exports diagnostics to .bacon-claude-diagnostics)"
