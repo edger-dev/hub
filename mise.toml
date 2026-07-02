@@ -8,6 +8,6 @@ description = "Type-check workspace"
 run = "cargo fmt --all"
 description = "Format all Rust code"
 
-[tasks.bacon-claude-diagnostics]
+[tasks._bacon-claude-diagnostics]
 run = "bacon claude-diagnostics"
 description = "⭐ Run bacon background checker (exports diagnostics to .bacon-claude-diagnostics)"
