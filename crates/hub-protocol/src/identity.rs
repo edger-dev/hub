@@ -14,7 +14,7 @@ use facet::Facet;
 ///
 /// This is the *only* way a node is addressed. It is stable across a node's
 /// links and across daemon restarts.
-#[derive(Facet, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Facet, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(pub String);
 
 /// Which link of a node a request concerns (§2.5).
@@ -22,7 +22,7 @@ pub struct NodeId(pub String);
 /// `stable` is distinguished: it is the routing default and the fallback when a
 /// requested link is absent. Other labels (e.g. `dev`) are conventions carried
 /// as-is.
-#[derive(Facet, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Facet, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LinkLabel(pub String);
 
 impl LinkLabel {
@@ -55,7 +55,7 @@ impl Default for LinkLabel {
 }
 
 /// A fully-qualified target: a specific link of a specific node.
-#[derive(Facet, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Facet, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeLink {
     pub node: NodeId,
     pub link: LinkLabel,

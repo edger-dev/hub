@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hub-protocol", "crates/node"]
+members = ["crates/hub", "crates/hub-protocol", "crates/node"]
 
 [workspace.package]
 edition = "2024"
