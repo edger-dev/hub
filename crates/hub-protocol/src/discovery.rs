@@ -7,7 +7,7 @@
 use facet::Facet;
 
 use crate::connector::Connector;
-use crate::identity::{LinkLabel, NodeId};
+use crate::identity::{LinkLabel, NodeId, NodeLink};
 
 /// One connected link of a node, with the connectors it currently serves.
 #[derive(Facet, Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,24 @@ pub struct NodeInfo {
 #[derive(Facet, Debug, Clone, PartialEq, Eq)]
 pub struct TopologySnapshot {
     pub nodes: Vec<NodeInfo>,
+}
+
+/// One change to the live topology, streamed on the tail (§2.6).
+///
+/// A subscriber first reads a [`TopologySnapshot`], then applies these events to
+/// keep its view current — new nodes appear, dead ones drop, and a node's links
+/// come and go under a stable node identity (§2.5).
+#[derive(Facet, Debug, Clone, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TopologyEvent {
+    /// A node's first link connected — the node is now visible.
+    NodeConnected(NodeInfo),
+    /// A node's last link dropped — the node is gone.
+    NodeDisconnected(NodeId),
+    /// An additional link connected under an already-visible node (§2.5).
+    LinkConnected(NodeId, LinkInfo),
+    /// One link of a still-connected node dropped.
+    LinkDisconnected(NodeLink),
 }
 
 #[cfg(test)]
@@ -66,6 +84,23 @@ mod tests {
         let v = sample();
         let json = facet_json::to_string(&v).unwrap();
         let back: TopologySnapshot = facet_json::from_str(&json).unwrap();
+        assert_eq!(v, back);
+    }
+
+    #[test]
+    fn topology_event_round_trips() {
+        let v = TopologyEvent::LinkConnected(
+            NodeId("alpha".to_string()),
+            LinkInfo {
+                link: LinkLabel::dev(),
+                connectors: vec![Connector {
+                    id: "pm-0".to_string(),
+                    kind: ConnectorKind::ProcessManager,
+                }],
+            },
+        );
+        let json = facet_json::to_string(&v).unwrap();
+        let back: TopologyEvent = facet_json::from_str(&json).unwrap();
         assert_eq!(v, back);
     }
 
