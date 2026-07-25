@@ -1,0 +1,3 @@
+{"@schema":"kinora-commit-archive-v1"}
+{"event_kind":"store","kind":"markdown","id":"0092dc47d183a6e1ec3e2185990f5e8904023dfe3e8057cc16b95fd7a6f33522","hash":"0092dc47d183a6e1ec3e2185990f5e8904023dfe3e8057cc16b95fd7a6f33522","parents":[],"ts":"2026-07-25T16:13:15.335824848Z","author":"YJ Park","provenance":"hub-m4","metadata":{"finding::source":"vox-0.10.0-rc.5","name":"vox-in-process-connection-cannot-be-closed","status::active":"true"}}
+{"event_kind":"assign","kind":"kin::assign","id":"0092dc47d183a6e1ec3e2185990f5e8904023dfe3e8057cc16b95fd7a6f33522","hash":"0092dc47d183a6e1ec3e2185990f5e8904023dfe3e8057cc16b95fd7a6f33522","parents":[],"ts":"2026-07-25T16:13:15.335824848Z","author":"YJ Park","provenance":"hub-m4","metadata":{"kin::target_root":"inbox"}}
