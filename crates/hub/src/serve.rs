@@ -125,6 +125,25 @@ where
     L::Tx: Send + 'static,
     L::Rx: Send + 'static,
 {
+    serve_connection_with(hub, link, |_| {}).await
+}
+
+/// As [`serve_connection`], but hands the established [`ConnectionHandle`] to
+/// `on_handle` first.
+///
+/// The caller needs the handle to shut the connection down deliberately: vox
+/// runs a connection on its own driver tasks, which own the socket, so dropping
+/// or aborting the serving task alone does **not** close it.
+pub async fn serve_connection_with<L>(
+    hub: ServedHub,
+    link: L,
+    on_handle: impl FnOnce(ConnectionHandle),
+) -> Result<(), vox::ConnectionError>
+where
+    L: Link + Send + 'static,
+    L::Tx: Send + 'static,
+    L::Rx: Send + 'static,
+{
     let (publish, connection) = watch::channel(None);
     let registered = Arc::new(Mutex::new(None));
 
@@ -158,6 +177,7 @@ where
 
     // Publish the handle so `register` can open its callback lane.
     let _ = publish.send(Some(handle.clone()));
+    on_handle(handle.clone());
 
     handle.closed().await;
 

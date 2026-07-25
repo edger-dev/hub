@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 hub-protocol = { path = "../hub-protocol" }
+tokio = { version = "1", features = ["net", "rt-multi-thread", "macros", "time"] }
 vox = "0.10.0-rc.5"
 
 [dev-dependencies]

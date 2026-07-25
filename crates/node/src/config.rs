@@ -20,6 +20,8 @@ pub enum ConfigError {
     /// No hub endpoint was configured. The hub is mandatory infrastructure, so
     /// this is a hard error, not an idle wait (§2.4).
     MissingHub,
+    /// The hub address names a transport this node cannot dial.
+    UnsupportedScheme(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -27,6 +29,9 @@ impl fmt::Display for ConfigError {
         match self {
             ConfigError::MissingHub => {
                 f.write_str("no hub configured — a node requires a hub to dial (§2.4)")
+            }
+            ConfigError::UnsupportedScheme(scheme) => {
+                write!(f, "unsupported hub address scheme `{scheme}` (expected tcp)")
             }
         }
     }

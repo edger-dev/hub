@@ -14,6 +14,7 @@ pub mod config;
 pub mod dial;
 pub mod reconnect;
 pub mod stub;
+pub mod tcp;
 
 pub use config::{ConfigError, HubEndpoint, NodeConfig};
 pub use dial::{DialError, serve_and_register};

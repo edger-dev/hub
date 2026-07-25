@@ -14,8 +14,10 @@ pub mod discovery;
 pub mod hub;
 pub mod registry;
 pub mod serve;
+pub mod tcp;
 
 pub use discovery::Subscribers;
 pub use hub::Hub;
 pub use registry::{LinkEntry, Registry};
 pub use serve::{ServedHub, serve_connection};
+pub use tcp::{HubListener, serve_tcp};
