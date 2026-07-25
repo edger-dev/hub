@@ -1,5 +1,7 @@
 //! Node configuration — and the rule that a hub is mandatory (§2.4).
 
+// implements: bf406db5b660bd595cccdfcec5921121bb5a1ac9281a0d9a5c28be2d7ccc79b4@bf406db5b660bd595cccdfcec5921121bb5a1ac9281a0d9a5c28be2d7ccc79b4
+
 use std::fmt;
 
 use hub_protocol::{Connector, LinkLabel, NodeId, Registration};

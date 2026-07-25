@@ -5,6 +5,8 @@
 //! a deploy all reduce to the same transient — "the hub blinked" — and the node
 //! recovers on its own. The loop never gives up; it only backs off.
 
+// implements: d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc@d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc
+
 use std::future::Future;
 use std::time::Duration;
 

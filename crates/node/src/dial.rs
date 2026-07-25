@@ -4,6 +4,8 @@
 //! inbound (so the hub can call `ping`/`deliver` back), and registers its link.
 //! It never listens for the hub to reach in (§2.4).
 
+// implements: d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc@d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc
+
 use std::fmt;
 
 use hub_protocol::service::{NodeIngressClient, NodeServiceDispatcher};
