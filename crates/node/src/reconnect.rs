@@ -10,8 +10,11 @@
 use std::future::Future;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use crate::config::NodeConfig;
-use crate::dial::{DialError, serve_and_register};
+use crate::connector::Connectors;
+use crate::dial::{DialError, serve_and_register_with};
 use vox::Link;
 
 /// Bounded exponential backoff between dial attempts.
@@ -66,6 +69,35 @@ pub enum DialOutcome {
 pub async fn run<L, Dial, DialFut, Sleep, SleepFut, Observe>(
     config: &NodeConfig,
     backoff: &Backoff,
+    dial: Dial,
+    sleep: Sleep,
+    observe: Observe,
+) where
+    L: Link + Send + 'static,
+    L::Tx: Send + 'static,
+    L::Rx: Send + 'static,
+    Dial: FnMut() -> DialFut,
+    DialFut: Future<Output = Option<L>>,
+    Sleep: FnMut(Duration) -> SleepFut,
+    SleepFut: Future<Output = ()>,
+    Observe: FnMut(DialOutcome) -> bool,
+{
+    run_with(
+        config,
+        Arc::new(Connectors::new()),
+        backoff,
+        dial,
+        sleep,
+        observe,
+    )
+    .await
+}
+
+/// As [`run`], but serving `connectors` on every connection (§1).
+pub async fn run_with<L, Dial, DialFut, Sleep, SleepFut, Observe>(
+    config: &NodeConfig,
+    connectors: Arc<Connectors>,
+    backoff: &Backoff,
     mut dial: Dial,
     mut sleep: Sleep,
     mut observe: Observe,
@@ -98,7 +130,7 @@ pub async fn run<L, Dial, DialFut, Sleep, SleepFut, Observe>(
             continue;
         };
 
-        match serve_and_register(link, config).await {
+        match serve_and_register_with(link, config, Arc::clone(&connectors)).await {
             Ok(connection) => {
                 failures = 0;
                 // Hold the connection until the hub goes away, then re-dial.

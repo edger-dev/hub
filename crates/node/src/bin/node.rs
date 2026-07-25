@@ -2,9 +2,11 @@
 //!
 //! Reads `NODE_ID`, `NODE_LINK` (default `stable`), and `HUB_ADDR` (or argv[1]).
 //! A missing hub is a hard startup error — the hub is mandatory (§2.4).
+use std::sync::Arc;
+
 use hub_protocol::{LinkLabel, NodeId};
 use node::reconnect::{Backoff, DialOutcome};
-use node::{HubEndpoint, NodeConfig};
+use node::{Connectors, FilesConnector, HubEndpoint, NodeConfig};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = std::env::var("NODE_ID").unwrap_or_else(|_| {
@@ -24,12 +26,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     // Fail fast on an address we could never dial, rather than retrying forever.
     config.hub.dial_target()?;
+    // Capabilities this node offers. A files root is optional; with none
+    // registered the node still connects and simply refuses routed calls (§1).
+    let mut connectors = Connectors::new();
+    if let Ok(root) = std::env::var("NODE_FILES_ROOT") {
+        connectors.register(Box::new(FilesConnector::new("files-0", &root)));
+        println!("serving files connector `files-0` rooted at {root}");
+    }
+    let connectors = Arc::new(connectors);
+
     println!(
-        "node {:?} link {:?} dialing hub at {}",
-        config.node, config.link, config.hub.0
+        "node {:?} link {:?} dialing hub at {} ({} connector(s))",
+        config.node,
+        config.link,
+        config.hub.0,
+        connectors.descriptors().len()
     );
-    node::reconnect::run(
+    node::reconnect::run_with(
         &config,
+        Arc::clone(&connectors),
         &Backoff::default(),
         || {
             let hub = config.hub.clone();

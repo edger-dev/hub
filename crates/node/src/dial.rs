@@ -7,13 +7,15 @@
 // implements: d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc@d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc
 
 use std::fmt;
+use std::sync::Arc;
 
 use hub_protocol::HubError;
 use hub_protocol::service::{NodeIngressClient, NodeServiceDispatcher};
 use vox::{ConnectionHandle, Link};
 
 use crate::config::NodeConfig;
-use crate::stub::StubNode;
+use crate::connector::Connectors;
+use crate::daemon::NodeDaemon;
 
 /// Why a reverse-dial attempt failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,10 +56,27 @@ where
     L::Tx: Send + 'static,
     L::Rx: Send + 'static,
 {
-    let stub = StubNode::from_config(config);
+    serve_and_register_with(link, config, Arc::new(Connectors::new())).await
+}
+
+/// As [`serve_and_register`], but serving `connectors` (§1).
+///
+/// The registration announces exactly what is registered, so discovery reports
+/// what the link can actually do (§2.6).
+pub async fn serve_and_register_with<L>(
+    link: L,
+    config: &NodeConfig,
+    connectors: Arc<Connectors>,
+) -> Result<ConnectionHandle, DialError>
+where
+    L: Link + Send + 'static,
+    L::Tx: Send + 'static,
+    L::Rx: Send + 'static,
+{
+    let daemon = NodeDaemon::new(config, Arc::clone(&connectors));
 
     let connection = vox::initiator_on(link)
-        .on_lane(NodeServiceDispatcher::new(stub))
+        .on_lane(NodeServiceDispatcher::new(daemon))
         .establish_connection()
         .await
         .map_err(|e| DialError::Establish(format!("{e:?}")))?;
@@ -69,7 +88,11 @@ where
 
     // vox carries the callee's domain error in `VoxError::User`, so the hub's
     // structured `HubError` is recovered intact rather than stringified.
-    hub.register(config.registration())
+    let mut registration = config.registration();
+    if !connectors.is_empty() {
+        registration.connectors = connectors.descriptors();
+    }
+    hub.register(registration)
         .await
         .map_err(|e| match e {
             vox::VoxError::User(hub_error) => DialError::Rejected(*hub_error),

@@ -11,6 +11,9 @@ workspace = true
 hub-protocol = { path = "../hub-protocol" }
 tokio = { version = "1", features = ["net", "rt-multi-thread", "macros", "time"] }
 vox = "0.10.0-rc.5"
+facet = "0.50.0-rc.5"
+facet-json = "0.50.0-rc.5"
 
 [dev-dependencies]
+tempdir = "0.3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
