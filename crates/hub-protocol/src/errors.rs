@@ -32,6 +32,21 @@ pub enum NodeError {
     Rejected(String),
 }
 
+/// Why a consumer's routed call failed — preserving *where* it failed.
+///
+/// The two arms want different consumer reactions: a [`RouteError::Hub`] often
+/// means the consumer's topology is stale (refresh discovery, retry), while a
+/// [`RouteError::Node`] means the call reached the connector and was refused
+/// (surface it; do not blindly retry).
+#[derive(Facet, Debug, Clone, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RouteError {
+    /// The hub could not deliver the call (no such node/link, node offline).
+    Hub(HubError),
+    /// The call reached the node, but its connector rejected it.
+    Node(NodeError),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,5 +66,17 @@ mod tests {
         let json = facet_json::to_string(&v).unwrap();
         let back: NodeError = facet_json::from_str(&json).unwrap();
         assert_eq!(v, back);
+    }
+
+    #[test]
+    fn route_error_preserves_which_side_failed() {
+        for v in [
+            RouteError::Hub(HubError::UnknownNode),
+            RouteError::Node(NodeError::Rejected("busy".to_string())),
+        ] {
+            let json = facet_json::to_string(&v).unwrap();
+            let back: RouteError = facet_json::from_str(&json).unwrap();
+            assert_eq!(v, back);
+        }
     }
 }

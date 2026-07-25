@@ -21,9 +21,9 @@ pub mod targeting;
 
 pub use connector::{Connector, ConnectorKind};
 pub use discovery::{LinkInfo, NodeInfo, TopologyEvent, TopologySnapshot};
-pub use errors::{HubError, NodeError};
+pub use errors::{HubError, NodeError, RouteError};
 pub use identity::{LinkLabel, NodeId, NodeLink};
 pub use registration::Registration;
 pub use routing::{RoutedCall, RoutedReply};
-pub use service::{HubService, NodeService, Pong};
+pub use service::{ConsumerApi, NodeIngress, NodeService, Pong};
 pub use targeting::LinkSelector;
