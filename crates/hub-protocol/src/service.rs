@@ -14,6 +14,7 @@
 //! trait; this crate ships the *contract only*, so no implementations live here.
 
 // implements: 14de2dfd6b1bbd978bfb44e8a3bbe718702ddf5c46cc59aa754d002932002d3f@14de2dfd6b1bbd978bfb44e8a3bbe718702ddf5c46cc59aa754d002932002d3f
+// implements: ba47c87abc0f961967d5ccfa9254945075c16c1e9a3b8eaed1e8195e1663c241@ba47c87abc0f961967d5ccfa9254945075c16c1e9a3b8eaed1e8195e1663c241
 
 use vox::Tx;
 

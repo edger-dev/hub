@@ -32,6 +32,7 @@ pub enum NodeError {
     Rejected(String),
 }
 
+// implements: 45af8b01ab1929e94682ed82013a4aad0b48af81c61b3dea89d7b8323cf94752@45af8b01ab1929e94682ed82013a4aad0b48af81c61b3dea89d7b8323cf94752
 /// Why a consumer's routed call failed — preserving *where* it failed.
 ///
 /// The two arms want different consumer reactions: a [`RouteError::Hub`] often
