@@ -1,0 +1,3 @@
+{"@schema":"kinora-commit-archive-v1"}
+{"event_kind":"store","kind":"markdown","id":"d78fb95fddc31aa42bc927da1eaed44292529b3671d1ef9ef58ec8cd0858e51c","hash":"d78fb95fddc31aa42bc927da1eaed44292529b3671d1ef9ef58ec8cd0858e51c","parents":[],"ts":"2026-07-25T17:17:02.321195276Z","author":"YJ Park","provenance":"hub-m5","metadata":{"name":"hub-connector-owns-its-payload","spec::section":"hub","status::active":"true"}}
+{"event_kind":"assign","kind":"kin::assign","id":"d78fb95fddc31aa42bc927da1eaed44292529b3671d1ef9ef58ec8cd0858e51c","hash":"d78fb95fddc31aa42bc927da1eaed44292529b3671d1ef9ef58ec8cd0858e51c","parents":[],"ts":"2026-07-25T17:17:02.321195276Z","author":"YJ Park","provenance":"hub-m5","metadata":{"kin::target_root":"specs"}}
