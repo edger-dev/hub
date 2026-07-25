@@ -11,7 +11,9 @@
 //! task: fab72ddcdfba854a1330679380958961aeb445a93660bf8445dfdf6f6400e75f
 
 pub mod config;
+pub mod dial;
 pub mod stub;
 
 pub use config::{ConfigError, HubEndpoint, NodeConfig};
+pub use dial::{DialError, serve_and_register};
 pub use stub::StubNode;
