@@ -1,0 +1,3 @@
+{"@schema":"kinora-commit-archive-v1"}
+{"event_kind":"assign","kind":"kin::assign","id":"a36b4e2a9648d284d5b5e01e3822370f084a7a9a257d5f2abc84492199d5ebb8","hash":"a36b4e2a9648d284d5b5e01e3822370f084a7a9a257d5f2abc84492199d5ebb8","parents":[],"ts":"2026-07-25T14:29:17.664614883Z","author":"YJ Park","provenance":"hub-m2","metadata":{"kin::target_root":"inbox"}}
+{"event_kind":"store","kind":"markdown","id":"a36b4e2a9648d284d5b5e01e3822370f084a7a9a257d5f2abc84492199d5ebb8","hash":"a36b4e2a9648d284d5b5e01e3822370f084a7a9a257d5f2abc84492199d5ebb8","parents":[],"ts":"2026-07-25T14:29:17.664614883Z","author":"YJ Park","provenance":"hub-m2","metadata":{"finding::source":"vox-0.10.0-rc.5","name":"vox-memory-link-drop-does-not-close","status::active":"true"}}

@@ -1,0 +1,2 @@
+{kind root, id 5e1439725d991c5f4f25e9faf6a992a0bf65fb38f0565918a032e4c01e142c91, parents (), ts 2026-07-25T14:30:30.242482937Z, author "YJ Park", provenance commit}
+{id a36b4e2a9648d284d5b5e01e3822370f084a7a9a257d5f2abc84492199d5ebb8, version a36b4e2a9648d284d5b5e01e3822370f084a7a9a257d5f2abc84492199d5ebb8, kind markdown, metadata {finding::source vox-0.10.0-rc.5, name vox-memory-link-drop-does-not-close, status::active true}, note "", pin false, head_ts 2026-07-25T14:29:17.664614883Z, parents ()}
