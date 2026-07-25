@@ -5,6 +5,9 @@
 //! several *links* (§2.5) — a default `stable` link and, say, a session-scoped
 //! `dev` link — told apart by a [`LinkLabel`], not by listen address.
 
+// implements: bf406db5b660bd595cccdfcec5921121bb5a1ac9281a0d9a5c28be2d7ccc79b4@bf406db5b660bd595cccdfcec5921121bb5a1ac9281a0d9a5c28be2d7ccc79b4
+// implements: 08c3ce357742ccf578caddcfb6578a92216b515adcfe1ac9de4543406be52cb0@08c3ce357742ccf578caddcfb6578a92216b515adcfe1ac9de4543406be52cb0
+
 use facet::Facet;
 
 /// A node's stable identity: its name in the hub registry (§2.4).

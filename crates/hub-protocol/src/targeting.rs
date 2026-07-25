@@ -4,6 +4,8 @@
 //! routes to the selected link, defaulting to `stable` and falling back to
 //! `stable` when the requested link is absent (§2.5).
 
+// implements: 08c3ce357742ccf578caddcfb6578a92216b515adcfe1ac9de4543406be52cb0@08c3ce357742ccf578caddcfb6578a92216b515adcfe1ac9de4543406be52cb0
+
 use facet::Facet;
 
 use crate::identity::{LinkLabel, NodeId};

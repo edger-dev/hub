@@ -11,6 +11,8 @@
 //! The `#[vox::service]` macro generates a `…Client` and a `…Dispatcher` for each
 //! trait; this crate ships the *contract only*, so no implementations live here.
 
+// implements: 14de2dfd6b1bbd978bfb44e8a3bbe718702ddf5c46cc59aa754d002932002d3f@14de2dfd6b1bbd978bfb44e8a3bbe718702ddf5c46cc59aa754d002932002d3f
+
 use vox::Tx;
 
 use crate::discovery::{TopologyEvent, TopologySnapshot};
