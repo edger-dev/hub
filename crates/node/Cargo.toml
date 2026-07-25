@@ -12,4 +12,4 @@ hub-protocol = { path = "../hub-protocol" }
 vox = "0.10.0-rc.5"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }

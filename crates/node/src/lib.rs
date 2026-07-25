@@ -12,8 +12,10 @@
 
 pub mod config;
 pub mod dial;
+pub mod reconnect;
 pub mod stub;
 
 pub use config::{ConfigError, HubEndpoint, NodeConfig};
 pub use dial::{DialError, serve_and_register};
+pub use reconnect::{Backoff, DialOutcome};
 pub use stub::StubNode;
