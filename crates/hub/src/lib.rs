@@ -9,6 +9,11 @@
 //!
 //! task: 6abbf3122736c91bbb0fc2de579e76a2adc4df1837e0577079e37fcc3ea19118
 
+pub mod discovery;
+#[allow(clippy::module_inception)]
+pub mod hub;
 pub mod registry;
 
+pub use discovery::Subscribers;
+pub use hub::Hub;
 pub use registry::{LinkEntry, Registry};
