@@ -13,7 +13,9 @@ pub mod discovery;
 #[allow(clippy::module_inception)]
 pub mod hub;
 pub mod registry;
+pub mod serve;
 
 pub use discovery::Subscribers;
 pub use hub::Hub;
 pub use registry::{LinkEntry, Registry};
+pub use serve::{ServedHub, serve_connection};

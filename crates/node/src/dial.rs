@@ -8,6 +8,7 @@
 
 use std::fmt;
 
+use hub_protocol::HubError;
 use hub_protocol::service::{NodeIngressClient, NodeServiceDispatcher};
 use vox::{ConnectionHandle, Link};
 
@@ -21,9 +22,10 @@ pub enum DialError {
     Establish(String),
     /// The `NodeIngress` lane could not be opened.
     OpenIngress(String),
-    /// The `register` call failed — the hub was unreachable or refused it. (vox
-    /// folds the domain `HubError` into the call error, so it arrives as text.)
-    Register(String),
+    /// The hub received the registration and refused it.
+    Rejected(HubError),
+    /// The `register` call never got an answer (transport-level failure).
+    RegisterTransport(String),
 }
 
 impl fmt::Display for DialError {
@@ -31,7 +33,8 @@ impl fmt::Display for DialError {
         match self {
             DialError::Establish(e) => write!(f, "hub connection handshake failed: {e}"),
             DialError::OpenIngress(e) => write!(f, "could not open the NodeIngress lane: {e}"),
-            DialError::Register(e) => write!(f, "register failed: {e}"),
+            DialError::Rejected(e) => write!(f, "hub refused registration: {e:?}"),
+            DialError::RegisterTransport(e) => write!(f, "register call failed: {e}"),
         }
     }
 }
@@ -64,9 +67,14 @@ where
         .await
         .map_err(|e| DialError::OpenIngress(format!("{e:?}")))?;
 
+    // vox carries the callee's domain error in `VoxError::User`, so the hub's
+    // structured `HubError` is recovered intact rather than stringified.
     hub.register(config.registration())
         .await
-        .map_err(|e| DialError::Register(format!("{e:?}")))?;
+        .map_err(|e| match e {
+            vox::VoxError::User(hub_error) => DialError::Rejected(*hub_error),
+            other => DialError::RegisterTransport(format!("{other:?}")),
+        })?;
 
     Ok(connection)
 }
