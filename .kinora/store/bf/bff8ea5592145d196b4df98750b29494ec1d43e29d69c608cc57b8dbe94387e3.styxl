@@ -1,0 +1,2 @@
+{kind root, id 3f22862dfcb113f59e935b6eee908f6fc4abe70dd36a1c7b5c0d87696284a152, parents (), ts 2026-07-25T06:10:58.31043Z, author "YJ Park", provenance commit}
+{id dd44162bff0f6e6095fe037b45c6de507bcff05f26e2caa18594937d27b9a1c9, version dd44162bff0f6e6095fe037b45c6de507bcff05f26e2caa18594937d27b9a1c9, kind markdown, metadata {doc::kind design-brief, doc::scope transport-topology-deploy, name hub-design-brief, status::active true}, note "", pin false, head_ts 2026-07-25T06:09:19.825170881Z, parents ()}
