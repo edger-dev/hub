@@ -1,0 +1,3 @@
+{"@schema":"kinora-commit-archive-v1"}
+{"event_kind":"store","kind":"markdown","id":"d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc","hash":"d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc","parents":[],"ts":"2026-07-25T14:01:00.377922934Z","author":"YJ Park","provenance":"hub-m2","metadata":{"name":"hub-reverse-dial-reconnect","spec::section":"hub","status::active":"true"}}
+{"event_kind":"assign","kind":"kin::assign","id":"d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc","hash":"d661c899202c18f1d5a968f14d5c87a9d6b422aa62e450dd2134a1c1bfdec4cc","parents":[],"ts":"2026-07-25T14:01:00.377922934Z","author":"YJ Park","provenance":"hub-m2","metadata":{"kin::target_root":"specs"}}
