@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 hub-protocol = { path = "../hub-protocol" }
-vox = "0.10.0-rc.5"
+vox = { version = "0.10.0-rc.5", features = ["transport-websocket"] }
 tokio = { version = "1", features = ["sync", "net", "rt", "rt-multi-thread", "macros", "time"] }
 
 [dev-dependencies]

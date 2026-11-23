@@ -17,6 +17,7 @@ pub mod peers;
 pub mod registry;
 pub mod serve;
 pub mod tcp;
+pub mod ws;
 
 pub use discovery::Subscribers;
 pub use events::EventSubscribers;
@@ -25,3 +26,4 @@ pub use peers::{Dialer, Peers, parse_peers, tcp_dialer};
 pub use registry::{LinkEntry, Registry};
 pub use serve::{ServedHub, serve_connection};
 pub use tcp::{HubListener, serve_tcp};
+pub use ws::WsHubListener;
