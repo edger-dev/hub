@@ -45,11 +45,8 @@ async fn nodes_authenticate_before_registering() {
     let _server = tokio::spawn(listener.serve(ServedHub::new().with_auth_token("secret")));
 
     let socket = tokio::net::TcpStream::connect(&addr).await.unwrap();
-    let result = node::serve_and_register(
-        vox::transport::tcp::StreamLink::tcp(socket),
-        &config(),
-    )
-    .await;
+    let result =
+        node::serve_and_register(vox::transport::tcp::StreamLink::tcp(socket), &config()).await;
     assert!(result.is_err());
 
     let socket = tokio::net::TcpStream::connect(&addr).await.unwrap();

@@ -192,3 +192,15 @@ Hub tracks connection health, message throughput, and error rates across all con
 
 Hub acts as a credential broker for sandboxed agents. Coordinators request tokens by capability name; hub resolves and injects them without exposing raw secrets to the container. Details TBD.
 
+
+## Connection authentication
+
+Set `HUB_AUTH_TOKEN` on the hub, nodes, peer hubs, and consumers to require that
+exact token before any registration, topology read, subscription, publication,
+or routed call. Missing or incorrect credentials are refused; a correct token
+authenticates only that connection. An empty token is a startup error, and an
+unset token preserves existing behavior.
+
+The token is read from the environment and is never logged or accepted as a
+command-line argument. It authenticates but does not encrypt traffic, so remote
+connections must remain on a private or separately encrypted network.

@@ -48,6 +48,7 @@ pub struct Peers {
     watchers: Arc<watch::Sender<usize>>,
     /// Where carried events go: the hub's fan-out, set by the hub.
     sink: Arc<Mutex<Option<mpsc::Sender<Carried>>>>,
+    auth_token: Option<String>,
 }
 
 /// What a follower hands the hub's fan-out.
@@ -65,6 +66,7 @@ impl Default for Peers {
             peers: Arc::default(),
             watchers: Arc::new(watch::channel(0).0),
             sink: Arc::default(),
+            auth_token: None,
         }
     }
 }
@@ -86,6 +88,12 @@ impl Peers {
             name: Some(name.into()),
             ..Self::default()
         }
+    }
+
+    /// Authenticate outbound peer connections with this token.
+    pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.auth_token = Some(token.into());
+        self
     }
 
     /// This hub's name, when it has one.
@@ -163,10 +171,18 @@ impl Peers {
                     let lane: Result<ConsumerApiClient, _> = handle.open_lane().await;
                     match lane {
                         Ok(client) => {
-                            peers.set(&name, Some(client));
-                            wait = Duration::from_secs(1);
-                            handle.closed().await;
-                            peers.set(&name, None);
+                            let authenticated = match &peers.auth_token {
+                                Some(token) => client.authenticate(token.clone()).await.is_ok(),
+                                None => true,
+                            };
+                            if authenticated {
+                                peers.set(&name, Some(client));
+                                wait = Duration::from_secs(1);
+                                handle.closed().await;
+                                peers.set(&name, None);
+                            } else {
+                                let _ = handle.shutdown();
+                            }
                         }
                         // Dropping a handle does not close its connection.
                         Err(_) => {

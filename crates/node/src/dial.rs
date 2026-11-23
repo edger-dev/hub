@@ -86,6 +86,13 @@ where
         .await
         .map_err(|e| DialError::OpenIngress(format!("{e:?}")))?;
 
+    if let Some(token) = &config.auth_token {
+        hub.authenticate(token.clone()).await.map_err(|e| match e {
+            vox::VoxError::User(hub_error) => DialError::Rejected(*hub_error),
+            other => DialError::RegisterTransport(format!("{other:?}")),
+        })?;
+    }
+
     // vox carries the callee's domain error in `VoxError::User`, so the hub's
     // structured `HubError` is recovered intact rather than stringified.
     let mut registration = config.registration();

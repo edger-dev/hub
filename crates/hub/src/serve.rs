@@ -9,6 +9,7 @@
 // implements: 7c924d1c2994326c261f907f81c39f0fa676381b53f7898556893bb4f750d85c@7c924d1c2994326c261f907f81c39f0fa676381b53f7898556893bb4f750d85c
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use hub_protocol::service::{ConsumerApiDispatcher, NodeIngressDispatcher, NodeServiceClient};
 use hub_protocol::{
@@ -24,6 +25,42 @@ use crate::hub::Hub;
 /// client opened back over its own connection.
 pub type ServedHub = Hub<NodeServiceClient>;
 
+/// Connection-scoped authentication, shared by both inbound audiences.
+// implements: hub::spec::connection-auth@59fc2cad98775fd2aeb0ecdd9f22ebf59a290cb37f106b3ab1f0bfcc932e4d2b
+#[derive(Clone)]
+struct ConnectionAuth {
+    required: Option<Arc<str>>,
+    authenticated: Arc<AtomicBool>,
+}
+
+impl ConnectionAuth {
+    fn new(required: Option<Arc<str>>) -> Self {
+        Self {
+            authenticated: Arc::new(AtomicBool::new(required.is_none())),
+            required,
+        }
+    }
+
+    fn authenticate(&self, token: String) -> Result<(), HubError> {
+        if self.required.as_deref() == Some(token.as_str()) {
+            self.authenticated.store(true, Ordering::Release);
+            Ok(())
+        } else if self.required.is_none() {
+            Ok(())
+        } else {
+            Err(HubError::Rejected("invalid authentication token".into()))
+        }
+    }
+
+    fn check(&self) -> Result<(), HubError> {
+        if self.authenticated.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            Err(HubError::Rejected("authentication required".into()))
+        }
+    }
+}
+
 /// Handles `NodeIngress` for **one** node connection.
 ///
 /// The dispatcher must exist before `establish_connection()` returns the handle,
@@ -35,6 +72,7 @@ struct NodeIngressHandler {
     connection: watch::Receiver<Option<ConnectionHandle>>,
     /// What this connection registered, so the accept path can retire it on close.
     registered: Arc<Mutex<Option<NodeLink>>>,
+    auth: ConnectionAuth,
 }
 
 impl NodeIngressHandler {
@@ -55,11 +93,12 @@ impl NodeIngressHandler {
 }
 
 impl NodeIngress for NodeIngressHandler {
-    async fn authenticate(&self, _token: String) -> Result<(), HubError> {
-        Ok(())
+    async fn authenticate(&self, token: String) -> Result<(), HubError> {
+        self.auth.authenticate(token)
     }
 
     async fn register(&self, registration: Registration) -> Result<(), HubError> {
+        self.auth.check()?;
         // `::` names a peer hub's node: no node may take it.
         if registration.node.0.contains(hub_protocol::PEER_SEPARATOR) {
             return Err(HubError::Rejected(format!(
@@ -91,25 +130,29 @@ impl NodeIngress for NodeIngressHandler {
 #[derive(Clone)]
 struct ConsumerApiHandler {
     hub: ServedHub,
+    auth: ConnectionAuth,
 }
 
 impl ConsumerApi for ConsumerApiHandler {
-    async fn authenticate(&self, _token: String) -> Result<(), HubError> {
-        Ok(())
+    async fn authenticate(&self, token: String) -> Result<(), HubError> {
+        self.auth.authenticate(token)
     }
 
     async fn topology(&self) -> Result<TopologySnapshot, HubError> {
+        self.auth.check()?;
         let mut snapshot = self.hub.snapshot().await;
         snapshot.nodes.extend(self.hub.peers().nodes().await);
         Ok(snapshot)
     }
 
     async fn subscribe_topology(&self, events: Tx<TopologyEvent>) -> Result<(), HubError> {
+        self.auth.check()?;
         self.hub.subscribe(events).await;
         Ok(())
     }
 
     async fn publish(&self, event: hub_protocol::HubEvent) -> Result<u32, HubError> {
+        self.auth.check()?;
         // `hub/` topics are the hub's own word to its subscribers.
         if event.topic.starts_with("hub/") {
             return Err(HubError::Rejected(format!(
@@ -132,6 +175,7 @@ impl ConsumerApi for ConsumerApiHandler {
         prefix: String,
         events: Tx<hub_protocol::HubEvent>,
     ) -> Result<(), HubError> {
+        self.auth.check()?;
         // The channel streams within this call: hold the call open until the
         // subscriber is gone. While it lives, peers' own events are carried
         // here (one subscription per peer, shared by every subscriber).
@@ -142,6 +186,7 @@ impl ConsumerApi for ConsumerApiHandler {
     }
 
     async fn local_topology(&self) -> Result<TopologySnapshot, HubError> {
+        self.auth.check()?;
         Ok(self.hub.snapshot().await)
     }
 
@@ -150,6 +195,7 @@ impl ConsumerApi for ConsumerApiHandler {
         prefix: String,
         events: Tx<hub_protocol::HubEvent>,
     ) -> Result<(), HubError> {
+        self.auth.check()?;
         let gone = self.hub.subscribe_local_events(prefix, events).await;
         let _ = gone.await;
         Ok(())
@@ -160,6 +206,7 @@ impl ConsumerApi for ConsumerApiHandler {
         target: LinkSelector,
         call: RoutedCall,
     ) -> Result<RoutedReply, RouteError> {
+        self.auth.check().map_err(RouteError::Hub)?;
         // A peer hub's node goes one hop, its name stripped; this hub's own
         // name is just a longer way to say a local node.
         let target = match target.node.split_peer() {
@@ -237,13 +284,18 @@ where
 {
     let (publish, connection) = watch::channel(None);
     let registered = Arc::new(Mutex::new(None));
+    let auth = ConnectionAuth::new(hub.auth_token());
 
     let node_handler = NodeIngressHandler {
         hub: hub.clone(),
         connection,
         registered: Arc::clone(&registered),
+        auth: auth.clone(),
     };
-    let consumer_handler = ConsumerApiHandler { hub: hub.clone() };
+    let consumer_handler = ConsumerApiHandler {
+        hub: hub.clone(),
+        auth,
+    };
 
     let acceptor = vox::lane_acceptor_fn(
         move |request: &vox::LaneRequest,

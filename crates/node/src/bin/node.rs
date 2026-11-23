@@ -22,6 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Vec::new(),
         env!("CARGO_PKG_VERSION").to_string(),
     )?;
+    let config = match std::env::var("HUB_AUTH_TOKEN") {
+        Ok(token) => config.with_auth_token(token),
+        Err(_) => config,
+    };
     // Fail fast on an address we could never dial, rather than retrying forever.
     config.hub.dial_target()?;
     // Capabilities this node offers. A files root is optional; with none
