@@ -218,3 +218,11 @@ let Cloudflare terminate HTTPS/WSS and configure the published application to
 forward to `http://127.0.0.1:15401`; the hub listener itself stays local. Keep
 `HUB_AUTH_TOKEN` configured. Native TLS termination in the hub is not part of
 this listener.
+
+### Node WebSocket dialing
+
+Nodes accept `HUB_ADDR=ws://host:port` or `HUB_ADDR=wss://host:port` as well as
+bare/TCP addresses. Registration, callbacks, token authentication, and reconnect
+backoff are shared with TCP. Use WSS for direct public VPS endpoints; plain WS
+is for local/private links. Cloudflare Access service-token headers are not yet
+part of the node handshake.

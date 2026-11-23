@@ -44,24 +44,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.hub.0,
         connectors.descriptors().len()
     );
-    node::reconnect::run_with(
-        &config,
-        Arc::clone(&connectors),
-        &Backoff::default(),
-        || {
-            let hub = config.hub.clone();
-            async move { node::tcp::dial(&hub).await.ok().flatten() }
-        },
-        tokio::time::sleep,
-        |outcome: DialOutcome| {
-            match outcome {
-                DialOutcome::ConnectedThenDropped => println!("hub connection closed; re-dialing"),
-                DialOutcome::Failed(e) => println!("dial failed ({e}); retrying"),
-            }
-            true
-        },
-    )
-    .await;
+    if matches!(config.hub.0.split_once("://"), Some(("ws" | "wss", _))) {
+        node::reconnect::run_with(
+            &config,
+            Arc::clone(&connectors),
+            &Backoff::default(),
+            || {
+                let hub = config.hub.clone();
+                async move { node::websocket::dial(&hub).await.ok().flatten() }
+            },
+            tokio::time::sleep,
+            |outcome: DialOutcome| {
+                match outcome {
+                    DialOutcome::ConnectedThenDropped => {
+                        println!("hub connection closed; re-dialing")
+                    }
+                    DialOutcome::Failed(e) => println!("dial failed ({e}); retrying"),
+                }
+                true
+            },
+        )
+        .await;
+    } else {
+        node::reconnect::run_with(
+            &config,
+            Arc::clone(&connectors),
+            &Backoff::default(),
+            || {
+                let hub = config.hub.clone();
+                async move { node::tcp::dial(&hub).await.ok().flatten() }
+            },
+            tokio::time::sleep,
+            |outcome: DialOutcome| {
+                match outcome {
+                    DialOutcome::ConnectedThenDropped => {
+                        println!("hub connection closed; re-dialing")
+                    }
+                    DialOutcome::Failed(e) => println!("dial failed ({e}); retrying"),
+                }
+                true
+            },
+        )
+        .await;
+    }
     Ok(())
 }
 /// Fall back to the machine's hostname as the node name (§2.4: explicit → env →

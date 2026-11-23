@@ -22,6 +22,8 @@ pub enum ConfigError {
     MissingHub,
     /// The hub address names a transport this node cannot dial.
     UnsupportedScheme(String),
+    /// A WebSocket address cannot be parsed as a handshake request.
+    InvalidWebSocketAddress(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -33,8 +35,11 @@ impl fmt::Display for ConfigError {
             ConfigError::UnsupportedScheme(scheme) => {
                 write!(
                     f,
-                    "unsupported hub address scheme `{scheme}` (expected tcp)"
+                    "unsupported hub address scheme `{scheme}` (expected tcp, ws, or wss)"
                 )
+            }
+            ConfigError::InvalidWebSocketAddress(error) => {
+                write!(f, "invalid WebSocket hub address: {error}")
             }
         }
     }

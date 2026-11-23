@@ -23,13 +23,10 @@ async fn a_node_registers_and_serves_over_websocket() {
         .await
         .unwrap()
         .expect("hub is listening");
-    let node_connection = node::serve_and_register_with(
-        link,
-        &config,
-        std::sync::Arc::new(Connectors::new()),
-    )
-    .await
-    .unwrap();
+    let node_connection =
+        node::serve_and_register_with(link, &config, std::sync::Arc::new(Connectors::new()))
+            .await
+            .unwrap();
 
     let consumer_connection = vox::connect(format!("ws://{addr}")).await.unwrap();
     let consumer: ConsumerApiClient = consumer_connection.open_lane().await.unwrap();
