@@ -55,6 +55,10 @@ impl NodeIngressHandler {
 }
 
 impl NodeIngress for NodeIngressHandler {
+    async fn authenticate(&self, _token: String) -> Result<(), HubError> {
+        Ok(())
+    }
+
     async fn register(&self, registration: Registration) -> Result<(), HubError> {
         // `::` names a peer hub's node: no node may take it.
         if registration.node.0.contains(hub_protocol::PEER_SEPARATOR) {
@@ -90,10 +94,14 @@ struct ConsumerApiHandler {
 }
 
 impl ConsumerApi for ConsumerApiHandler {
-    async fn topology(&self) -> TopologySnapshot {
+    async fn authenticate(&self, _token: String) -> Result<(), HubError> {
+        Ok(())
+    }
+
+    async fn topology(&self) -> Result<TopologySnapshot, HubError> {
         let mut snapshot = self.hub.snapshot().await;
         snapshot.nodes.extend(self.hub.peers().nodes().await);
-        snapshot
+        Ok(snapshot)
     }
 
     async fn subscribe_topology(&self, events: Tx<TopologyEvent>) -> Result<(), HubError> {
@@ -133,8 +141,8 @@ impl ConsumerApi for ConsumerApiHandler {
         Ok(())
     }
 
-    async fn local_topology(&self) -> TopologySnapshot {
-        self.hub.snapshot().await
+    async fn local_topology(&self) -> Result<TopologySnapshot, HubError> {
+        Ok(self.hub.snapshot().await)
     }
 
     async fn subscribe_local_events(

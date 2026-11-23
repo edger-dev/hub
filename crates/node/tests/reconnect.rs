@@ -22,6 +22,10 @@ struct CountingHub {
 }
 
 impl NodeIngress for CountingHub {
+    async fn authenticate(&self, _token: String) -> Result<(), HubError> {
+        Ok(())
+    }
+
     async fn register(&self, registration: Registration) -> Result<(), HubError> {
         self.registrations
             .lock()

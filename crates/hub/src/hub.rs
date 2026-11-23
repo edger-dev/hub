@@ -25,6 +25,7 @@ pub struct Hub<T> {
     events: Arc<Mutex<EventSubscribers>>,
     /// This hub's name and its peer hubs.
     peers: Peers,
+    auth_token: Option<std::sync::Arc<str>>,
 }
 
 struct Inner<T> {
@@ -38,6 +39,7 @@ impl<T> Clone for Hub<T> {
             inner: Arc::clone(&self.inner),
             events: Arc::clone(&self.events),
             peers: self.peers.clone(),
+            auth_token: self.auth_token.clone(),
         }
     }
 }
@@ -58,7 +60,19 @@ impl<T: Clone> Hub<T> {
             })),
             events: Arc::new(Mutex::new(EventSubscribers::new())),
             peers: Peers::default(),
+            auth_token: None,
         }
+    }
+
+    /// Require this token on every inbound connection.
+    pub fn with_auth_token(mut self, token: impl Into<Arc<str>>) -> Self {
+        self.auth_token = Some(token.into());
+        self
+    }
+
+    /// The credential required of inbound connections, when one is configured.
+    pub fn auth_token(&self) -> Option<Arc<str>> {
+        self.auth_token.clone()
     }
 
     /// This hub, named and peered by `peers`; events carried from a peer

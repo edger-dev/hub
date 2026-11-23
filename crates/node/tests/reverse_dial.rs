@@ -20,6 +20,10 @@ struct FakeHub {
 }
 
 impl NodeIngress for FakeHub {
+    async fn authenticate(&self, _token: String) -> Result<(), HubError> {
+        Ok(())
+    }
+
     async fn register(&self, registration: Registration) -> Result<(), HubError> {
         *self.seen.lock().expect("registration mutex poisoned") = Some(registration);
         Ok(())

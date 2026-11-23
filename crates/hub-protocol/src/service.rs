@@ -40,6 +40,9 @@ pub struct Pong {
 /// Dialed into the hub by a reverse-dialing node (§2.1, §2.4).
 #[vox::service]
 pub trait NodeIngress {
+    /// Authenticate this connection before any other operation.
+    async fn authenticate(&self, token: String) -> Result<(), HubError>;
+
     /// A reverse-dialing link announces itself and its connectors (§2.1, §2.4).
     ///
     /// Re-registration by a known `(node, link)` is an expected reconnect, not an
@@ -50,10 +53,13 @@ pub trait NodeIngress {
 /// Dialed into the hub by a consumer — the console or the agent shim (§1, §2.6).
 #[vox::service]
 pub trait ConsumerApi {
+    /// Authenticate this connection before any other operation.
+    async fn authenticate(&self, token: String) -> Result<(), HubError>;
+
     /// A point-in-time view of the connected mesh (§2.6).
     ///
     /// Reads are link-agnostic (§2.5): any connected link can back the snapshot.
-    async fn topology(&self) -> TopologySnapshot;
+    async fn topology(&self) -> Result<TopologySnapshot, HubError>;
 
     /// Subscribe to live topology changes; the hub sends each change into
     /// `events` (§2.6). Pair a first [`ConsumerApi::topology`] snapshot with this
@@ -94,7 +100,7 @@ pub trait ConsumerApi {
     /// This hub's own nodes, with no peer's — what a peer hub reads, so two
     /// hubs asking each other never recurse.
     // implements: a297d880b240fa86f9872753ebc3009c0d3af0dd572ec9eaa2a17a3f815f8d45@55ffeceb39795324eb405923fdba976d6b9a2e959425e4dee7511dc681794e87
-    async fn local_topology(&self) -> TopologySnapshot;
+    async fn local_topology(&self) -> Result<TopologySnapshot, HubError>;
 
     /// As [`ConsumerApi::subscribe_events`], but only events published to
     /// this hub itself, never one it carries from a peer — what a peer hub

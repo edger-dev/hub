@@ -54,6 +54,7 @@ pub struct NodeConfig {
     pub hub: HubEndpoint,
     pub connectors: Vec<Connector>,
     pub agent_version: String,
+    pub auth_token: Option<String>,
 }
 
 impl NodeConfig {
@@ -73,7 +74,14 @@ impl NodeConfig {
             hub,
             connectors,
             agent_version,
+            auth_token: None,
         })
+    }
+
+    /// Authenticate to the hub with this token before registering.
+    pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.auth_token = Some(token.into());
+        self
     }
 
     /// The [`Registration`] this node's link announces to the hub (§2.1).

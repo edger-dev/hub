@@ -1,0 +1,63 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use hub::{HubListener, ServedHub};
+use hub_protocol::service::ConsumerApiClient;
+use hub_protocol::{LinkLabel, NodeId};
+use node::{HubEndpoint, NodeConfig};
+
+async fn consumer(addr: &str) -> ConsumerApiClient {
+    let socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let connection = vox::initiator_on(vox::transport::tcp::StreamLink::tcp(socket))
+        .establish_connection()
+        .await
+        .unwrap();
+    connection.open_lane().await.unwrap()
+}
+
+fn config() -> NodeConfig {
+    NodeConfig::new(
+        NodeId("alpha".into()),
+        LinkLabel::stable(),
+        Some(HubEndpoint("unused".into())),
+        vec![],
+        "test".into(),
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn consumers_authenticate_before_reading_or_routing() {
+    let listener = HubListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().to_string();
+    let _server = tokio::spawn(listener.serve(ServedHub::new().with_auth_token("secret")));
+    let consumer = consumer(&addr).await;
+
+    assert!(consumer.topology().await.is_err());
+    assert!(consumer.authenticate("wrong".into()).await.is_err());
+    consumer.authenticate("secret".into()).await.unwrap();
+    consumer.topology().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nodes_authenticate_before_registering() {
+    let listener = HubListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().to_string();
+    let _server = tokio::spawn(listener.serve(ServedHub::new().with_auth_token("secret")));
+
+    let socket = tokio::net::TcpStream::connect(&addr).await.unwrap();
+    let result = node::serve_and_register(
+        vox::transport::tcp::StreamLink::tcp(socket),
+        &config(),
+    )
+    .await;
+    assert!(result.is_err());
+
+    let socket = tokio::net::TcpStream::connect(&addr).await.unwrap();
+    let connection = node::serve_and_register(
+        vox::transport::tcp::StreamLink::tcp(socket),
+        &config().with_auth_token("secret"),
+    )
+    .await
+    .unwrap();
+    drop(connection);
+}
