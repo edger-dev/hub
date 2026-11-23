@@ -24,6 +24,7 @@ impl HubEndpoint {
         match self.0.split_once("://") {
             None => Ok(&self.0),
             Some(("tcp", rest)) => Ok(rest),
+            Some(("ws" | "wss", _)) => Ok(&self.0),
             Some((scheme, _)) => Err(ConfigError::UnsupportedScheme(scheme.to_string())),
         }
     }
@@ -61,10 +62,10 @@ mod tests {
 
     #[test]
     fn rejects_an_unsupported_scheme() {
-        let e = HubEndpoint("ws://127.0.0.1:15400".to_string());
+        let e = HubEndpoint("http://127.0.0.1:15400".to_string());
         assert_eq!(
             e.dial_target().unwrap_err(),
-            ConfigError::UnsupportedScheme("ws".to_string())
+            ConfigError::UnsupportedScheme("http".to_string())
         );
     }
 

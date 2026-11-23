@@ -17,6 +17,7 @@ pub mod dial;
 pub mod files;
 pub mod reconnect;
 pub mod tcp;
+pub mod websocket;
 
 pub use config::{ConfigError, HubEndpoint, NodeConfig};
 pub use connector::{Connector, Connectors};
