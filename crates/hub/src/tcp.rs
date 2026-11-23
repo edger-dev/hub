@@ -20,8 +20,8 @@ use crate::serve::{ServedHub, serve_connection_with};
 /// longer serves. Shutting down explicitly makes "the hub went away" observable,
 /// which is what lets a node start reconnecting (§2.1).
 #[derive(Default)]
-struct LiveConnections {
-    handles: Arc<Mutex<Vec<ConnectionHandle>>>,
+pub(crate) struct LiveConnections {
+    pub(crate) handles: Arc<Mutex<Vec<ConnectionHandle>>>,
 }
 
 impl Drop for LiveConnections {

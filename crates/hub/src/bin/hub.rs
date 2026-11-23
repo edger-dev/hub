@@ -72,6 +72,11 @@ async fn main() -> std::io::Result<()> {
     }
 
     let mut serving = tokio::task::JoinSet::new();
+    if let Ok(ws_addr) = std::env::var("HUB_WS_ADDR") {
+        let listener = hub::WsHubListener::bind(&ws_addr).await?;
+        println!("hub listening for WebSocket on {}", listener.local_addr());
+        serving.spawn(listener.serve(hub.clone()));
+    }
     for addr in addr.split(',').map(str::trim).filter(|a| !a.is_empty()) {
         let listener = hub::HubListener::bind(addr).await?;
         println!("hub listening on {}", listener.local_addr());

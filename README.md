@@ -204,3 +204,17 @@ unset token preserves existing behavior.
 The token is read from the environment and is never logged or accepted as a
 command-line argument. It authenticates but does not encrypt traffic, so remote
 connections must remain on a private or separately encrypted network.
+
+## WebSocket listener
+
+Set `HUB_WS_ADDR` to serve plain WebSocket beside the existing TCP listeners:
+
+```sh
+HUB_WS_ADDR=127.0.0.1:15401
+```
+
+This uses the same routing and connection authentication. For public access,
+let Cloudflare terminate HTTPS/WSS and configure the published application to
+forward to `http://127.0.0.1:15401`; the hub listener itself stays local. Keep
+`HUB_AUTH_TOKEN` configured. Native TLS termination in the hub is not part of
+this listener.
