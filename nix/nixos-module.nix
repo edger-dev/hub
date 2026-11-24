@@ -2,6 +2,7 @@
 #
 # The hub routes and never owns: it keeps no state beyond liveness, so the unit
 # needs no state directory and runs as a dynamic user.
+# implements: hub::spec::websocket-transport@c8c8feec188821c5d915875ffe406573ee9392b6fb537f9ddfa052bed3557c84
 { config, lib, ... }:
 let
   cfg = config.services.hub;
@@ -29,6 +30,20 @@ in
       description = "More addresses serving the same hub — e.g. a private network peer hubs dial.";
     };
 
+    websocketAddress = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "127.0.0.1:15401";
+      description = "Optional plain-WebSocket address serving the same hub, normally behind a TLS proxy.";
+    };
+
+    environmentFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/run/secrets/hub.env";
+      description = "Optional environment file containing secrets such as HUB_AUTH_TOKEN.";
+    };
+
     name = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -53,6 +68,9 @@ in
       environment = {
         HUB_ADDR = lib.concatStringsSep "," ([ cfg.address ] ++ cfg.extraAddresses);
       } // lib.optionalAttrs (cfg.name != null) { HUB_NAME = cfg.name; }
+      // lib.optionalAttrs (cfg.websocketAddress != null) {
+        HUB_WS_ADDR = cfg.websocketAddress;
+      }
       // lib.optionalAttrs (cfg.peers != { }) {
         HUB_PEERS = lib.concatStringsSep "," (lib.mapAttrsToList (n: a: "${n}=${a}") cfg.peers);
       };
@@ -61,6 +79,7 @@ in
         Restart = "always";
         RestartSec = 2;
         DynamicUser = true;
+        EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile;
       };
       # Binding a bridge address can race the bridge coming up; keep retrying.
       startLimitIntervalSec = 0;
