@@ -218,6 +218,44 @@ async fn a_consumer_sees_and_reaches_a_peers_node() {
 }
 
 #[tokio::test]
+async fn one_outbound_peer_connection_carries_both_directions() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let edger = ServedHub::new().with_peers(Peers::new("edger"));
+    edger.peers().add("hub", dialer(&public)).unwrap();
+
+    let edger_dir = tempdir::TempDir::new("reverse-peer-edger").unwrap();
+    std::fs::write(edger_dir.path().join("motd.txt"), "hello from edger").unwrap();
+    let public_dir = tempdir::TempDir::new("reverse-peer-public").unwrap();
+    std::fs::write(public_dir.path().join("motd.txt"), "hello from public").unwrap();
+    let _yolo = node_on(&edger, "yolo", edger_dir.path()).await;
+    let _public_node = node_on(&public, "public-node", public_dir.path()).await;
+    let on_edger = consumer(&edger).await;
+    let on_public = consumer(&public).await;
+
+    eventually(|| {
+        let (on_edger, on_public) = (on_edger.clone(), on_public.clone());
+        async move {
+            names(&on_edger.topology().await.unwrap()) == ["hub::public-node"]
+                && names(&on_public.topology().await.unwrap()) == ["edger::yolo"]
+        }
+    })
+    .await;
+
+    for (client, node, expected) in [
+        (&on_edger, "hub::public-node", "hello from public"),
+        (&on_public, "edger::yolo", "hello from edger"),
+    ] {
+        let reply = client
+            .route(LinkSelector::node(NodeId(node.into())), read("motd.txt"))
+            .await
+            .expect("routed over the reverse-registered connection");
+        let contents: FileContents =
+            facet_json::from_str(std::str::from_utf8(&reply.payload).unwrap()).unwrap();
+        assert_eq!(contents.contents, expected);
+    }
+}
+
+#[tokio::test]
 async fn an_unreachable_peer_hides_its_nodes_and_its_calls_fail_fast() {
     let pc = ServedHub::new().with_peers(Peers::new("pc"));
     pc.peers()
