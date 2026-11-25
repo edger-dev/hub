@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use hub::{HubListener, ServedHub};
-use hub_protocol::service::ConsumerApiClient;
+use hub_protocol::service::{ConsumerApiClient, PeerIngressClient};
 use hub_protocol::{LinkLabel, NodeId};
 use node::{HubEndpoint, NodeConfig};
 
@@ -36,6 +36,26 @@ async fn consumers_authenticate_before_reading_or_routing() {
     assert!(consumer.authenticate("wrong".into()).await.is_err());
     consumer.authenticate("secret".into()).await.unwrap();
     consumer.topology().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn peers_authenticate_before_registering() {
+    let listener = HubListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().to_string();
+    let hub = ServedHub::new()
+        .with_auth_token("secret")
+        .with_peers(hub::Peers::new("hub"));
+    let _server = tokio::spawn(listener.serve(hub.clone()));
+
+    let socket = tokio::net::TcpStream::connect(&addr).await.unwrap();
+    let connection = vox::initiator_on(vox::transport::tcp::StreamLink::tcp(socket))
+        .establish_connection()
+        .await
+        .unwrap();
+    let peer: PeerIngressClient = connection.open_lane().await.unwrap();
+    assert!(peer.register("edger".into()).await.is_err());
+    assert!(peer.authenticate("wrong".into()).await.is_err());
+    assert!(hub.peers().names().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

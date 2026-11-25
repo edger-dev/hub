@@ -232,15 +232,22 @@ part of the node handshake.
 `HUB_PEERS` accepts WebSocket addresses alongside bare/TCP addresses:
 
 ```sh
-HUB_NAME=pc
-HUB_PEERS=edger=wss://hub.example.com
+HUB_NAME=edger
+HUB_PEERS=hub=wss://hub.example.com
 HUB_AUTH_TOKEN=<shared-hub-token>
 ```
 
-The peer connection carries the same authenticated `ConsumerApi` lane,
-keepalive, reconnect backoff, topology, and one-hop routing as TCP. Configure
-each direction that needs topology or routed calls explicitly; dialing a peer
-does not register the reverse relationship or enable multi-hop routing.
+The peer connection carries authenticated `ConsumerApi` lanes in both
+directions, with keepalive, reconnect backoff, topology, events, and one-hop
+routing shared with TCP. Edger registers its `HUB_NAME` through `PeerIngress`;
+the receiving hub opens a reverse consumer lane over the same connection. The
+public hub therefore sees `edger::<node>` without a return address or its own
+`HUB_PEERS` entry, while edger sees `hub::<node>`. Registration and both
+consumer directions authenticate before use. Multi-hop routing remains refused.
+
+A reconnect supersedes the earlier reverse registration without letting the old
+connection's cleanup remove it. Existing mutually configured peers and older
+peers without `PeerIngress` retain their forward-only behavior.
 
 For a Cloudflare Access-protected endpoint, set both service-token values on the
 dialing hub. They are sent only as WebSocket handshake headers and are never

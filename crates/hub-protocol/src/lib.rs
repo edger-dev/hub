@@ -27,5 +27,5 @@ pub use events::{HubEvent, MAX_EVENT_PAYLOAD, SUBSCRIBED_TOPIC};
 pub use identity::{LinkLabel, NodeId, NodeLink, PEER_SEPARATOR};
 pub use registration::Registration;
 pub use routing::{RoutedCall, RoutedReply};
-pub use service::{ConsumerApi, NodeIngress, NodeService, Pong};
+pub use service::{ConsumerApi, NodeIngress, NodeService, PeerIngress, Pong};
 pub use targeting::LinkSelector;

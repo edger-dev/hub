@@ -1,9 +1,10 @@
-//! Serving the hub's two inbound services over vox (§1, §2.4).
+//! Serving the hub's inbound services over vox (§1, §2.4).
 //!
-//! One accept path handles both audiences, routed by service name — nodes arrive
-//! on `NodeIngress`, consumers on `ConsumerApi`. A node's connection is also the
-//! hub's route *back* to it: on register the hub opens a `NodeService` lane to
-//! the caller and stores it, so a later `route` can reach that link.
+//! One accept path handles every audience, routed by service name — nodes arrive
+//! on `NodeIngress`, peer hubs on `PeerIngress`, and consumers on `ConsumerApi`.
+//! A node's connection is also the hub's route *back* to it: on register the hub
+//! opens a `NodeService` lane to the caller and stores it. Peer registration
+//! similarly opens a reverse `ConsumerApi` lane over the same connection.
 
 // implements: ba47c87abc0f961967d5ccfa9254945075c16c1e9a3b8eaed1e8195e1663c241@ba47c87abc0f961967d5ccfa9254945075c16c1e9a3b8eaed1e8195e1663c241
 // implements: 7c924d1c2994326c261f907f81c39f0fa676381b53f7898556893bb4f750d85c@7c924d1c2994326c261f907f81c39f0fa676381b53f7898556893bb4f750d85c
@@ -11,10 +12,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use hub_protocol::service::{ConsumerApiDispatcher, NodeIngressDispatcher, NodeServiceClient};
+use hub_protocol::service::{
+    ConsumerApiClient, ConsumerApiDispatcher, NodeIngressDispatcher, NodeServiceClient,
+    PeerIngressDispatcher,
+};
 use hub_protocol::{
-    ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink, Registration, RouteError,
-    RoutedCall, RoutedReply, TopologyEvent, TopologySnapshot,
+    ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink, PeerIngress, Registration,
+    RouteError, RoutedCall, RoutedReply, TopologyEvent, TopologySnapshot,
 };
 use tokio::sync::{Mutex, watch};
 use vox::{ConnectionHandle, Link, Tx};
@@ -26,7 +30,7 @@ use crate::hub::Hub;
 pub type ServedHub = Hub<NodeServiceClient>;
 
 /// Connection-scoped authentication, shared by both inbound audiences.
-// implements: hub::spec::connection-auth@59fc2cad98775fd2aeb0ecdd9f22ebf59a290cb37f106b3ab1f0bfcc932e4d2b
+// implements: hub::spec::connection-auth@ba5249130cbe8cd98be07ca92c54f376871ffdc54fbb85f4f580996a3fbd427b
 #[derive(Clone)]
 struct ConnectionAuth {
     required: Option<Arc<str>>,
@@ -122,6 +126,65 @@ impl NodeIngress for NodeIngressHandler {
         };
         self.hub.register(registration, client).await;
         *self.registered.lock().await = Some(target);
+        Ok(())
+    }
+}
+
+/// Handles `PeerIngress` for one peer connection.
+#[derive(Clone)]
+struct PeerIngressHandler {
+    hub: ServedHub,
+    connection: watch::Receiver<Option<ConnectionHandle>>,
+    registered: Arc<Mutex<Option<(String, u64)>>>,
+    auth: ConnectionAuth,
+}
+
+impl PeerIngressHandler {
+    async fn connection(&self) -> Result<ConnectionHandle, HubError> {
+        let mut rx = self.connection.clone();
+        loop {
+            if let Some(handle) = rx.borrow().clone() {
+                return Ok(handle);
+            }
+            if rx.changed().await.is_err() {
+                return Err(HubError::Internal(
+                    "connection closed before it was published".to_string(),
+                ));
+            }
+        }
+    }
+}
+
+// implements: 586748b7b572d2285f4747e555105426f76892c08966826018bfc00ae8d48efa@701163e19fa9e575f1e75f0b347c08ef3b640403f42e6282fab59a6917561c1a
+impl PeerIngress for PeerIngressHandler {
+    async fn authenticate(&self, token: String) -> Result<(), HubError> {
+        self.auth.authenticate(token)
+    }
+
+    async fn register(&self, peer: String) -> Result<(), HubError> {
+        self.auth.check()?;
+        let connection = self.connection().await?;
+        let client: ConsumerApiClient = connection.open_lane().await.map_err(|error| {
+            HubError::Internal(format!(
+                "could not open reverse ConsumerApi lane: {error:?}"
+            ))
+        })?;
+        if let Some(token) = self.hub.auth_token() {
+            client
+                .authenticate(token.to_string())
+                .await
+                .map_err(|error| {
+                    HubError::Rejected(format!(
+                        "could not authenticate reverse ConsumerApi lane: {error:?}"
+                    ))
+                })?;
+        }
+        let registration = self
+            .hub
+            .peers()
+            .register_reverse(&peer, client)
+            .map_err(HubError::Rejected)?;
+        *self.registered.lock().await = Some((peer, registration));
         Ok(())
     }
 }
@@ -253,6 +316,24 @@ impl ConsumerApi for ConsumerApiHandler {
     }
 }
 
+/// Serve this hub's `ConsumerApi` on an outbound peer connection, so the peer
+/// can open its reverse lane immediately after `PeerIngress` registration.
+pub fn peer_consumer_acceptor(hub: &ServedHub) -> impl vox::LaneAcceptor {
+    let handler = ConsumerApiHandler {
+        hub: hub.clone(),
+        auth: ConnectionAuth::new(hub.auth_token()),
+    };
+    vox::lane_acceptor_fn(move |request: &vox::LaneRequest, lane: vox::PendingLane| {
+        if request.service() != "ConsumerApi" {
+            return Err(vox::LaneRejection::new(
+                vox::LaneRejectReason::UnknownService,
+            ));
+        }
+        lane.handle_with(ConsumerApiDispatcher::new(handler.clone()));
+        Ok(())
+    })
+}
+
 /// Serve one accepted connection until it closes, then retire what it registered.
 ///
 /// Lanes are routed by service name, which is exactly the audience split: a node
@@ -284,12 +365,19 @@ where
 {
     let (publish, connection) = watch::channel(None);
     let registered = Arc::new(Mutex::new(None));
+    let registered_peer = Arc::new(Mutex::new(None));
     let auth = ConnectionAuth::new(hub.auth_token());
 
     let node_handler = NodeIngressHandler {
         hub: hub.clone(),
-        connection,
+        connection: connection.clone(),
         registered: Arc::clone(&registered),
+        auth: auth.clone(),
+    };
+    let peer_handler = PeerIngressHandler {
+        hub: hub.clone(),
+        connection: connection.clone(),
+        registered: Arc::clone(&registered_peer),
         auth: auth.clone(),
     };
     let consumer_handler = ConsumerApiHandler {
@@ -304,6 +392,10 @@ where
             match request.service() {
                 "NodeIngress" => {
                     lane.handle_with(NodeIngressDispatcher::new(node_handler.clone()));
+                    Ok(())
+                }
+                "PeerIngress" => {
+                    lane.handle_with(PeerIngressDispatcher::new(peer_handler.clone()));
                     Ok(())
                 }
                 "ConsumerApi" => {
@@ -331,6 +423,9 @@ where
     // The link is gone — discovery must reflect that (§2.6).
     if let Some(target) = registered.lock().await.take() {
         hub.disconnect(&target).await;
+    }
+    if let Some((peer, registration)) = registered_peer.lock().await.take() {
+        hub.peers().unregister_reverse(&peer, registration);
     }
     Ok(())
 }

@@ -1,20 +1,23 @@
 //! Peer hubs: each hub dials a static list of named peers and reaches their
 //! nodes one hop away, as `<peer>::<node>`.
 //!
-//! A peer is dialled as an ordinary consumer of the other hub: its own nodes
-//! come from `local_topology`, calls go through `route` with the name
-//! stripped (and refused if still qualified), and events through one
-//! `subscribe_local_events` per peer, held while anyone here subscribes. The
-//! two `local` methods are what keep everything one hop.
+//! A peer is dialled as a consumer of the other hub and registers its own name
+//! for a reverse consumer lane on the same connection. Its own nodes come from
+//! `local_topology`, calls go through `route` with the name stripped (and
+//! refused if still qualified), and events through one `subscribe_local_events`
+//! per peer, held while anyone here subscribes. The two `local` methods keep
+//! everything one hop. Older peers can remain forward-only.
 //!
 //! implements: a297d880b240fa86f9872753ebc3009c0d3af0dd572ec9eaa2a17a3f815f8d45@55ffeceb39795324eb405923fdba976d6b9a2e959425e4dee7511dc681794e87
+//! implements: 586748b7b572d2285f4747e555105426f76892c08966826018bfc00ae8d48efa@701163e19fa9e575f1e75f0b347c08ef3b640403f42e6282fab59a6917561c1a
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use hub_protocol::service::ConsumerApiClient;
+use hub_protocol::service::{ConsumerApiClient, PeerIngressClient};
 use hub_protocol::{HubEvent, NodeInfo, PEER_SEPARATOR, TopologySnapshot};
 use tokio::sync::{mpsc, watch};
 use vox::ConnectionHandle;
@@ -36,6 +39,8 @@ const KEEPALIVE: Duration = Duration::from_secs(10);
 struct Peer {
     name: String,
     client: Option<ConsumerApiClient>,
+    configured: bool,
+    registration: u64,
 }
 
 /// This hub's name and its peers, each redialled forever.
@@ -49,6 +54,7 @@ pub struct Peers {
     /// Where carried events go: the hub's fan-out, set by the hub.
     sink: Arc<Mutex<Option<mpsc::Sender<Carried>>>>,
     auth_token: Option<String>,
+    next_registration: Arc<AtomicU64>,
 }
 
 /// What a follower hands the hub's fan-out.
@@ -67,6 +73,7 @@ impl Default for Peers {
             watchers: Arc::new(watch::channel(0).0),
             sink: Arc::default(),
             auth_token: None,
+            next_registration: Arc::new(AtomicU64::new(1)),
         }
     }
 }
@@ -138,18 +145,68 @@ impl Peers {
         Watching(Arc::clone(&self.watchers))
     }
 
+    /// Attach a consumer opened back over an authenticated peer connection.
+    pub(crate) fn register_reverse(
+        &self,
+        peer: &str,
+        client: ConsumerApiClient,
+    ) -> Result<u64, String> {
+        self.validate_name(peer)?;
+        let registration = self.next_registration.fetch_add(1, Ordering::Relaxed);
+        let follow = self.with(|peers| {
+            if let Some(existing) = peers.iter_mut().find(|p| p.name == peer) {
+                if existing.configured {
+                    return Err(format!("peer {peer:?} is already configured"));
+                }
+                existing.client = Some(client);
+                existing.registration = registration;
+                return Ok(false);
+            }
+            peers.push(Peer {
+                name: peer.to_string(),
+                client: Some(client),
+                configured: false,
+                registration,
+            });
+            Ok(true)
+        })?;
+        if follow {
+            let peers = self.clone();
+            let peer = peer.to_string();
+            tokio::spawn(async move { peers.follow(peer).await });
+        }
+        Ok(registration)
+    }
+
+    /// Clear a reverse registration only if its connection is still current.
+    pub(crate) fn unregister_reverse(&self, peer: &str, registration: u64) {
+        self.with(|peers| {
+            if let Some(existing) = peers.iter_mut().find(|p| p.name == peer)
+                && !existing.configured
+                && existing.registration == registration
+            {
+                existing.client = None;
+            }
+        });
+    }
+
+    fn validate_name(&self, peer: &str) -> Result<(), String> {
+        if Some(peer) == self.name() {
+            return Err(format!("peer {peer:?} is this hub's own name"));
+        }
+        if peer.is_empty() || peer.contains(PEER_SEPARATOR) {
+            return Err(format!("peer {peer:?}: a name without {PEER_SEPARATOR}"));
+        }
+        Ok(())
+    }
+
     /// Dial `peer` with `dialer`, and redial whenever it drops, backing off
     /// up to thirty seconds while it is down; follow its events while anyone
     /// here does. Refuses this hub's own name, a name already added, and a
     /// name holding the peer separator. Needs a tokio runtime.
     pub fn add(&self, peer: impl Into<String>, dialer: Dialer) -> Result<(), String> {
         let peer = peer.into();
-        if Some(peer.as_str()) == self.name() {
-            return Err(format!("peer {peer:?} is this hub's own name"));
-        }
-        if peer.is_empty() || peer.contains(PEER_SEPARATOR) {
-            return Err(format!("peer {peer:?}: a name without {PEER_SEPARATOR}"));
-        }
+        self.validate_name(&peer)?;
         let added = self.with(|peers| {
             if peers.iter().any(|p| p.name == peer) {
                 return false;
@@ -157,6 +214,8 @@ impl Peers {
             peers.push(Peer {
                 name: peer.clone(),
                 client: None,
+                configured: true,
+                registration: 0,
             });
             true
         });
@@ -176,6 +235,22 @@ impl Peers {
                                 None => true,
                             };
                             if authenticated {
+                                if let Some(local_name) = peers.name().map(str::to_owned)
+                                    && let Ok(ingress) =
+                                        handle.open_lane::<PeerIngressClient>().await
+                                {
+                                    let authenticated = match &peers.auth_token {
+                                        Some(token) => {
+                                            ingress.authenticate(token.clone()).await.is_ok()
+                                        }
+                                        None => true,
+                                    };
+                                    if authenticated {
+                                        // Older peers and existing mutual configurations
+                                        // remain useful in the forward direction.
+                                        let _ = ingress.register(local_name).await;
+                                    }
+                                }
                                 peers.set(&name, Some(client));
                                 wait = Duration::from_secs(1);
                                 handle.closed().await;
@@ -319,15 +394,21 @@ pub struct AccessServiceToken {
 }
 
 /// Select a peer transport from the address scheme.
-// implements: 8976aead0fb36e8b16db9819a9d18b7be09cc5cc6944143a063bd3e2c247b69f@8976aead0fb36e8b16db9819a9d18b7be09cc5cc6944143a063bd3e2c247b69f
-pub fn peer_dialer(addr: String, access: Option<AccessServiceToken>) -> Dialer {
+// implements: 8976aead0fb36e8b16db9819a9d18b7be09cc5cc6944143a063bd3e2c247b69f@3e9c1d8f725914bc1b2f86f165ff7badbf38f05f153e0505f11b0cc7da37eede
+pub fn peer_dialer(
+    hub: &crate::ServedHub,
+    addr: String,
+    access: Option<AccessServiceToken>,
+) -> Dialer {
     if !matches!(addr.split_once("://"), Some(("ws" | "wss", _))) {
-        return tcp_dialer(addr);
+        return tcp_dialer(hub, addr);
     }
     let _ = rustls::crypto::ring::default_provider().install_default();
+    let hub = hub.clone();
     Arc::new(move || {
-        let (addr, access) = (addr.clone(), access.clone());
+        let (addr, access, hub) = (addr.clone(), access.clone(), hub.clone());
         Box::pin(async move {
+            let acceptor = crate::serve::peer_consumer_acceptor(&hub);
             let request = websocket_request(&addr, access.as_ref())?;
             let (stream, _) = tokio::time::timeout(
                 Duration::from_secs(3),
@@ -337,6 +418,7 @@ pub fn peer_dialer(addr: String, access: Option<AccessServiceToken>) -> Dialer {
             .map_err(|_| format!("{addr} did not answer"))?
             .map_err(|error| format!("{addr}: {error}"))?;
             vox::initiator_on(vox::transport::websocket::WsLink::new(stream))
+                .on_lane(acceptor)
                 .keepalive(vox::ConnectionKeepaliveConfig {
                     ping_interval: KEEPALIVE,
                     pong_timeout: KEEPALIVE,
@@ -379,10 +461,12 @@ fn websocket_request(
 
 /// A dialer for a peer hub at `addr` over TCP: three seconds to connect, and
 /// a keepalive so a peer that vanishes (power, network) is noticed.
-pub fn tcp_dialer(addr: String) -> Dialer {
+pub fn tcp_dialer(hub: &crate::ServedHub, addr: String) -> Dialer {
+    let hub = hub.clone();
     Arc::new(move || {
-        let addr = addr.clone();
+        let (addr, hub) = (addr.clone(), hub.clone());
         Box::pin(async move {
+            let acceptor = crate::serve::peer_consumer_acceptor(&hub);
             let socket = tokio::time::timeout(
                 Duration::from_secs(3),
                 tokio::net::TcpStream::connect(addr.as_str()),
@@ -391,6 +475,7 @@ pub fn tcp_dialer(addr: String) -> Dialer {
             .map_err(|_| format!("{addr} did not answer"))?
             .map_err(|e| format!("{addr}: {e}"))?;
             vox::initiator_on(vox::transport::tcp::StreamLink::tcp(socket))
+                .on_lane(acceptor)
                 .keepalive(vox::ConnectionKeepaliveConfig {
                     ping_interval: KEEPALIVE,
                     pong_timeout: KEEPALIVE,

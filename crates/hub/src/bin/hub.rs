@@ -88,12 +88,13 @@ async fn main() -> std::io::Result<()> {
             std::env::var("CF_ACCESS_CLIENT_SECRET").ok(),
         )
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        hub = hub.with_peers(set);
         for (peer, peer_addr) in peers {
             println!("hub {name}: peer {peer} at {peer_addr}");
-            set.add(peer, hub::peer_dialer(peer_addr, access.clone()))
+            hub.peers()
+                .add(peer, hub::peer_dialer(&hub, peer_addr, access.clone()))
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         }
-        hub = hub.with_peers(set);
     }
 
     let mut serving = tokio::task::JoinSet::new();

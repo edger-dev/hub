@@ -1,10 +1,12 @@
 //! The vox service traits — the RPC surface each role dials.
 //!
-//! Three services, split by *who dials whom* so a peer only ever sees the
+//! Four services, split by *who dials whom* so a peer only ever sees the
 //! methods its role should call:
 //!
 //! - [`NodeIngress`] is dialed *into* the hub by a **node** that reverse-dials to
 //!   offer itself (§2.1, §2.4). Its one job is to register.
+//! - [`PeerIngress`] is dialed *into* the hub by a **peer hub** to register its
+//!   name and offer a reverse consumer lane over the same connection.
 //! - [`ConsumerApi`] is dialed *into* the hub by a **consumer** (the console or
 //!   the agent shim) to discover the mesh and route calls (§1, §2.6).
 //! - [`NodeService`] is what the hub dials back *toward a node*. The node answers
@@ -48,6 +50,17 @@ pub trait NodeIngress {
     /// Re-registration by a known `(node, link)` is an expected reconnect, not an
     /// error (§2.4).
     async fn register(&self, registration: Registration) -> Result<(), HubError>;
+}
+
+/// Dialed into the hub by a reverse-dialing peer hub.
+// implements: 586748b7b572d2285f4747e555105426f76892c08966826018bfc00ae8d48efa@701163e19fa9e575f1e75f0b347c08ef3b640403f42e6282fab59a6917561c1a
+#[vox::service]
+pub trait PeerIngress {
+    /// Authenticate this connection before any other operation.
+    async fn authenticate(&self, token: String) -> Result<(), HubError>;
+
+    /// Announce the dialing hub's name and offer a reverse consumer lane.
+    async fn register(&self, peer: String) -> Result<(), HubError>;
 }
 
 /// Dialed into the hub by a consumer — the console or the agent shim (§1, §2.6).
@@ -135,7 +148,7 @@ mod tests {
     #[allow(unused_imports)]
     use super::{
         ConsumerApiClient, ConsumerApiDispatcher, NodeIngressClient, NodeIngressDispatcher,
-        NodeServiceClient, NodeServiceDispatcher,
+        NodeServiceClient, NodeServiceDispatcher, PeerIngressClient, PeerIngressDispatcher,
     };
 
     #[test]

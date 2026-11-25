@@ -22,11 +22,50 @@ fn attach(hub: &ServedHub) -> vox::MemoryLink {
     peer
 }
 
-/// A dialer reaching `hub` in memory.
-fn dialer(hub: &ServedHub) -> Dialer {
-    let hub = hub.clone();
+/// A dialer reaching `remote` in memory and serving `local` on its reverse lane.
+fn dialer(remote: &ServedHub, local: &ServedHub) -> Dialer {
+    let (remote, local) = (remote.clone(), local.clone());
     Arc::new(move || {
-        let link = attach(&hub);
+        let link = attach(&remote);
+        let acceptor = hub::serve::peer_consumer_acceptor(&local);
+        Box::pin(async move {
+            vox::initiator_on(link)
+                .on_lane(acceptor)
+                .establish_connection()
+                .await
+                .map_err(|e| format!("{e:?}"))
+        })
+    })
+}
+
+fn recording_dialer(
+    remote: &ServedHub,
+    local: &ServedHub,
+) -> (Dialer, Arc<std::sync::Mutex<Vec<vox::ConnectionHandle>>>) {
+    let (remote, local) = (remote.clone(), local.clone());
+    let connections = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&connections);
+    let dialer: Dialer = Arc::new(move || {
+        let link = attach(&remote);
+        let acceptor = hub::serve::peer_consumer_acceptor(&local);
+        let recorded = Arc::clone(&recorded);
+        Box::pin(async move {
+            let connection = vox::initiator_on(link)
+                .on_lane(acceptor)
+                .establish_connection()
+                .await
+                .map_err(|e| format!("{e:?}"))?;
+            recorded.lock().unwrap().push(connection.clone());
+            Ok(connection)
+        })
+    });
+    (dialer, connections)
+}
+
+fn forward_only_dialer(remote: &ServedHub) -> Dialer {
+    let remote = remote.clone();
+    Arc::new(move || {
+        let link = attach(&remote);
         Box::pin(async move {
             vox::initiator_on(link)
                 .establish_connection()
@@ -37,20 +76,24 @@ fn dialer(hub: &ServedHub) -> Dialer {
 }
 
 async fn consumer(hub: &ServedHub) -> ConsumerApiClient {
-    vox::initiator_on(attach(hub))
+    let client: ConsumerApiClient = vox::initiator_on(attach(hub))
         .establish_connection()
         .await
         .expect("establish")
         .open_lane()
         .await
-        .expect("lane")
+        .expect("lane");
+    if let Some(token) = hub.auth_token() {
+        client.authenticate(token.to_string()).await.unwrap();
+    }
+    client
 }
 
 /// A node named `name` on `hub`, serving a files connector over `dir`.
 async fn node_on(hub: &ServedHub, name: &str, dir: &std::path::Path) -> vox::ConnectionHandle {
     let mut connectors = Connectors::new();
     connectors.register(Box::new(FilesConnector::new("files-0", dir)));
-    let config = node::NodeConfig::new(
+    let mut config = node::NodeConfig::new(
         NodeId(name.to_string()),
         LinkLabel::stable(),
         Some(node::HubEndpoint("memory://peers".to_string())),
@@ -58,6 +101,9 @@ async fn node_on(hub: &ServedHub, name: &str, dir: &std::path::Path) -> vox::Con
         "1.0.0".to_string(),
     )
     .expect("config");
+    if let Some(token) = hub.auth_token() {
+        config = config.with_auth_token(token.to_string());
+    }
     tokio::time::timeout(
         Duration::from_secs(10),
         node::serve_and_register_with(attach(hub), &config, Arc::new(connectors)),
@@ -104,8 +150,8 @@ where
 fn two_hubs() -> (ServedHub, ServedHub) {
     let pc = ServedHub::new().with_peers(Peers::new("pc"));
     let edger = ServedHub::new().with_peers(Peers::new("edger"));
-    pc.peers().add("edger", dialer(&edger)).unwrap();
-    edger.peers().add("pc", dialer(&pc)).unwrap();
+    pc.peers().add("edger", dialer(&edger, &pc)).unwrap();
+    edger.peers().add("pc", dialer(&pc, &edger)).unwrap();
     (pc, edger)
 }
 
@@ -219,9 +265,13 @@ async fn a_consumer_sees_and_reaches_a_peers_node() {
 
 #[tokio::test]
 async fn one_outbound_peer_connection_carries_both_directions() {
-    let public = ServedHub::new().with_peers(Peers::new("hub"));
-    let edger = ServedHub::new().with_peers(Peers::new("edger"));
-    edger.peers().add("hub", dialer(&public)).unwrap();
+    let public = ServedHub::new()
+        .with_auth_token("secret")
+        .with_peers(Peers::new("hub").with_auth_token("secret"));
+    let edger = ServedHub::new()
+        .with_auth_token("secret")
+        .with_peers(Peers::new("edger").with_auth_token("secret"));
+    edger.peers().add("hub", dialer(&public, &edger)).unwrap();
 
     let edger_dir = tempdir::TempDir::new("reverse-peer-edger").unwrap();
     std::fs::write(edger_dir.path().join("motd.txt"), "hello from edger").unwrap();
@@ -235,8 +285,8 @@ async fn one_outbound_peer_connection_carries_both_directions() {
     eventually(|| {
         let (on_edger, on_public) = (on_edger.clone(), on_public.clone());
         async move {
-            names(&on_edger.topology().await.unwrap()) == ["hub::public-node"]
-                && names(&on_public.topology().await.unwrap()) == ["edger::yolo"]
+            names(&on_edger.topology().await.unwrap()) == ["hub::public-node", "yolo"]
+                && names(&on_public.topology().await.unwrap()) == ["edger::yolo", "public-node"]
         }
     })
     .await;
@@ -253,6 +303,61 @@ async fn one_outbound_peer_connection_carries_both_directions() {
             facet_json::from_str(std::str::from_utf8(&reply.payload).unwrap()).unwrap();
         assert_eq!(contents.contents, expected);
     }
+}
+
+#[tokio::test]
+async fn a_reverse_registration_disconnects_and_reconnects_with_its_connection() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let edger = ServedHub::new().with_peers(Peers::new("edger"));
+    let (dialer, connections) = recording_dialer(&public, &edger);
+    edger.peers().add("hub", dialer).unwrap();
+    let dir = tempdir::TempDir::new("reverse-peer-reconnect").unwrap();
+    std::fs::write(dir.path().join("motd.txt"), "still here").unwrap();
+    let _yolo = node_on(&edger, "yolo", dir.path()).await;
+    let on_public = consumer(&public).await;
+
+    eventually(|| {
+        let on_public = on_public.clone();
+        async move { names(&on_public.topology().await.unwrap()) == ["edger::yolo"] }
+    })
+    .await;
+    let first = connections.lock().unwrap()[0].clone();
+    let _ = first.shutdown();
+    eventually(|| {
+        let on_public = on_public.clone();
+        async move { on_public.topology().await.unwrap().nodes.is_empty() }
+    })
+    .await;
+    eventually(|| {
+        let on_public = on_public.clone();
+        let connections = Arc::clone(&connections);
+        async move {
+            connections.lock().unwrap().len() >= 2
+                && names(&on_public.topology().await.unwrap()) == ["edger::yolo"]
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_forward_only_peer_still_works_without_registering() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let older = ServedHub::new().with_peers(Peers::new("older"));
+    older
+        .peers()
+        .add("hub", forward_only_dialer(&public))
+        .unwrap();
+    let dir = tempdir::TempDir::new("forward-only-peer").unwrap();
+    let _public_node = node_on(&public, "public-node", dir.path()).await;
+    let on_older = consumer(&older).await;
+
+    eventually(|| {
+        let on_older = on_older.clone();
+        async move { names(&on_older.topology().await.unwrap()) == ["hub::public-node"] }
+    })
+    .await;
+    assert!(public.peers().names().is_empty());
+    assert!(public.snapshot().await.nodes.len() == 1);
 }
 
 #[tokio::test]
@@ -393,7 +498,7 @@ async fn peers_reach_each_other_over_tcp() {
 
     let pc = ServedHub::new().with_peers(Peers::new("pc"));
     pc.peers()
-        .add("edger", hub::tcp_dialer(edger_addr))
+        .add("edger", hub::tcp_dialer(&pc, edger_addr))
         .unwrap();
     let dir = tempdir::TempDir::new("peers-tcp").unwrap();
     let _yolo = node_on(&edger, "yolo", dir.path()).await;
