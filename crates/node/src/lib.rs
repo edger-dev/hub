@@ -25,3 +25,8 @@ pub use daemon::NodeDaemon;
 pub use dial::{DialError, serve_and_register, serve_and_register_with};
 pub use files::FilesConnector;
 pub use reconnect::{Backoff, DialOutcome};
+
+/// Select the crypto provider required for WebSocket TLS connections.
+pub fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}

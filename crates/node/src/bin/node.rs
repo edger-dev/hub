@@ -9,6 +9,7 @@ use node::reconnect::{Backoff, DialOutcome};
 use node::{Connectors, FilesConnector, HubEndpoint, NodeConfig};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    node::install_crypto_provider();
     let node = std::env::var("NODE_ID").unwrap_or_else(|_| hostname_fallback());
     let link = std::env::var("NODE_LINK").unwrap_or_else(|_| LinkLabel::STABLE.to_string());
     let hub = std::env::args()
