@@ -130,12 +130,17 @@ impl NodeIngress for NodeIngressHandler {
     }
 }
 
+enum ReverseRegistration {
+    Open(Option<(String, u64)>),
+    Closed,
+}
+
 /// Handles `PeerIngress` for one peer connection.
 #[derive(Clone)]
 struct PeerIngressHandler {
     hub: ServedHub,
     connection: watch::Receiver<Option<ConnectionHandle>>,
-    registered: Arc<Mutex<Option<(String, u64)>>>,
+    registered: Arc<Mutex<ReverseRegistration>>,
     auth: ConnectionAuth,
 }
 
@@ -163,6 +168,18 @@ impl PeerIngress for PeerIngressHandler {
 
     async fn register(&self, peer: String) -> Result<(), HubError> {
         self.auth.check()?;
+        let mut registered = self.registered.lock().await;
+        match &*registered {
+            ReverseRegistration::Closed => {
+                return Err(HubError::Rejected("peer connection is closed".into()));
+            }
+            ReverseRegistration::Open(Some(_)) => {
+                return Err(HubError::Rejected(
+                    "peer connection already registered a name".into(),
+                ));
+            }
+            ReverseRegistration::Open(None) => {}
+        }
         let connection = self.connection().await?;
         let client: ConsumerApiClient = connection.open_lane().await.map_err(|error| {
             HubError::Internal(format!(
@@ -184,7 +201,7 @@ impl PeerIngress for PeerIngressHandler {
             .peers()
             .register_reverse(&peer, client)
             .map_err(HubError::Rejected)?;
-        *self.registered.lock().await = Some((peer, registration));
+        *registered = ReverseRegistration::Open(Some((peer, registration)));
         Ok(())
     }
 }
@@ -365,7 +382,7 @@ where
 {
     let (publish, connection) = watch::channel(None);
     let registered = Arc::new(Mutex::new(None));
-    let registered_peer = Arc::new(Mutex::new(None));
+    let registered_peer = Arc::new(Mutex::new(ReverseRegistration::Open(None)));
     let auth = ConnectionAuth::new(hub.auth_token());
 
     let node_handler = NodeIngressHandler {
@@ -424,7 +441,11 @@ where
     if let Some(target) = registered.lock().await.take() {
         hub.disconnect(&target).await;
     }
-    if let Some((peer, registration)) = registered_peer.lock().await.take() {
+    let reverse = std::mem::replace(
+        &mut *registered_peer.lock().await,
+        ReverseRegistration::Closed,
+    );
+    if let ReverseRegistration::Open(Some((peer, registration))) = reverse {
         hub.peers().unregister_reverse(&peer, registration);
     }
     Ok(())

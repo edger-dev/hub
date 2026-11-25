@@ -63,34 +63,39 @@ async fn main() -> std::io::Result<()> {
     if let Some(token) = &auth_token {
         hub = hub.with_auth_token(token.as_str());
     }
+    let name = std::env::var("HUB_NAME").ok().or_else(hostname);
+    if !peers.is_empty() && name.is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "peer hubs need a name: set HUB_NAME",
+        ));
+    }
+    if let Some(name) = &name
+        && name.contains(hub_protocol::PEER_SEPARATOR)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("HUB_NAME {name:?}: a name without `::`"),
+        ));
+    }
+    let mut set = name
+        .as_ref()
+        .map_or_else(hub::Peers::default, |name| hub::Peers::new(name.clone()));
+    if let Some(token) = &auth_token {
+        set = set.with_auth_token(token.clone());
+    }
+    hub = hub.with_peers(set);
     if !peers.is_empty() {
-        let name = std::env::var("HUB_NAME")
-            .ok()
-            .or_else(hostname)
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "peer hubs need a name: set HUB_NAME",
-                )
-            })?;
-        if name.contains(hub_protocol::PEER_SEPARATOR) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("HUB_NAME {name:?}: a name without `::`"),
-            ));
-        }
-        let mut set = hub::Peers::new(name.clone());
-        if let Some(token) = auth_token {
-            set = set.with_auth_token(token);
-        }
         let access = access_service_token(
             std::env::var("CF_ACCESS_CLIENT_ID").ok(),
             std::env::var("CF_ACCESS_CLIENT_SECRET").ok(),
         )
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        hub = hub.with_peers(set);
         for (peer, peer_addr) in peers {
-            println!("hub {name}: peer {peer} at {peer_addr}");
+            println!(
+                "hub {}: peer {peer} at {peer_addr}",
+                name.as_deref().unwrap_or("unnamed")
+            );
             hub.peers()
                 .add(peer, hub::peer_dialer(&hub, peer_addr, access.clone()))
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;

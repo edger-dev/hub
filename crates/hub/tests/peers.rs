@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hub::{Dialer, Peers, ServedHub, serve_connection};
-use hub_protocol::service::ConsumerApiClient;
+use hub_protocol::service::{ConsumerApiClient, PeerIngressClient};
 use hub_protocol::{HubEvent, LinkLabel, LinkSelector, NodeId, RouteError, RoutedCall};
 use node::files::{FileContents, PathRequest};
 use node::{Connectors, FilesConnector};
@@ -60,6 +60,17 @@ fn recording_dialer(
         })
     });
     (dialer, connections)
+}
+
+async fn register_peer(connection: &vox::ConnectionHandle, name: &str) -> Result<(), String> {
+    let ingress: PeerIngressClient = connection
+        .open_lane()
+        .await
+        .map_err(|error| format!("{error:?}"))?;
+    ingress
+        .register(name.to_string())
+        .await
+        .map_err(|error| format!("{error:?}"))
 }
 
 fn forward_only_dialer(remote: &ServedHub) -> Dialer {
@@ -340,6 +351,49 @@ async fn a_reverse_registration_disconnects_and_reconnects_with_its_connection()
 }
 
 #[tokio::test]
+async fn an_old_reverse_disconnect_cannot_clear_a_newer_registration() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let edger = ServedHub::new().with_peers(Peers::new("edger"));
+    let (dialer, _connections) = recording_dialer(&public, &edger);
+    let dir = tempdir::TempDir::new("reverse-peer-generations").unwrap();
+    let _yolo = node_on(&edger, "yolo", dir.path()).await;
+    let on_public = consumer(&public).await;
+
+    let first = dialer().await.unwrap();
+    register_peer(&first, "edger").await.unwrap();
+    eventually(|| {
+        let on_public = on_public.clone();
+        async move { names(&on_public.topology().await.unwrap()) == ["edger::yolo"] }
+    })
+    .await;
+    assert!(register_peer(&first, "another").await.is_err());
+
+    let second = dialer().await.unwrap();
+    register_peer(&second, "edger").await.unwrap();
+    let _ = first.shutdown();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(names(&on_public.topology().await.unwrap()), ["edger::yolo"]);
+    let client = public.peers().client("edger").await.unwrap();
+    assert_eq!(names(&client.local_topology().await.unwrap()), ["yolo"]);
+}
+
+#[tokio::test]
+async fn reverse_registration_refuses_invalid_and_configured_names() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let edger = ServedHub::new().with_peers(Peers::new("edger"));
+    let (dialer, _connections) = recording_dialer(&public, &edger);
+    let connection = dialer().await.unwrap();
+    for name in ["", "bad::name", "hub"] {
+        assert!(register_peer(&connection, name).await.is_err(), "{name}");
+    }
+
+    let down: Dialer = Arc::new(|| Box::pin(async { Err("down".to_string()) }));
+    public.peers().add("edger", down).unwrap();
+    assert!(register_peer(&connection, "edger").await.is_err());
+    assert_eq!(public.peers().names(), ["edger"]);
+}
+
+#[tokio::test]
 async fn a_forward_only_peer_still_works_without_registering() {
     let public = ServedHub::new().with_peers(Peers::new("hub"));
     let older = ServedHub::new().with_peers(Peers::new("older"));
@@ -485,6 +539,40 @@ async fn an_event_crosses_one_hop_and_never_echoes() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn an_event_crosses_a_reverse_registered_peer() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let edger = ServedHub::new().with_peers(Peers::new("edger"));
+    edger.peers().add("hub", dialer(&public, &edger)).unwrap();
+    let on_public = consumer(&public).await;
+    let on_edger = consumer(&edger).await;
+    let mut rx = subscribe(&on_public).await;
+
+    let mut crossed = false;
+    for n in 0..100 {
+        let topic = format!("kudo/reverse/{n}");
+        publish(&on_edger, &topic).await;
+        let got = tokio::time::timeout(Duration::from_millis(50), async {
+            loop {
+                match rx.recv().await {
+                    Ok(Some(event)) => {
+                        if owned(event).topic.starts_with("kudo/reverse/") {
+                            return;
+                        }
+                    }
+                    _ => std::future::pending::<()>().await,
+                }
+            }
+        })
+        .await;
+        if got.is_ok() {
+            crossed = true;
+            break;
+        }
+    }
+    assert!(crossed, "the reverse peer's subscription never came up");
 }
 
 /// The same over TCP, with the daemon's own dialer: two hubs on their own
