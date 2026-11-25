@@ -5,6 +5,10 @@
 //! nodes, a private network for peer hubs).
 //! Peer hubs: `HUB_NAME` (this hub's name, defaulting to the hostname) and
 //! `HUB_PEERS` (`name=addr,…`); without `HUB_PEERS` the hub stands alone.
+//! WebSocket peers may also use `CF_ACCESS_CLIENT_ID` and
+//! `CF_ACCESS_CLIENT_SECRET` as a pair.
+
+use hub::AccessServiceToken;
 
 /// This machine's hostname, as the kernel has it.
 fn hostname() -> Option<String> {
@@ -13,6 +17,22 @@ fn hostname() -> Option<String> {
         .find_map(|path| std::fs::read_to_string(path).ok())
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
+}
+
+fn access_service_token(
+    id: Option<String>,
+    secret: Option<String>,
+) -> Result<Option<AccessServiceToken>, String> {
+    match (id, secret) {
+        (Some(id), Some(secret)) if !id.is_empty() && !secret.is_empty() => {
+            Ok(Some(AccessServiceToken { id, secret }))
+        }
+        (None, None) => Ok(None),
+        _ => Err(
+            "CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET must both be nonempty and set together"
+                .into(),
+        ),
+    }
 }
 
 #[tokio::main]
@@ -63,9 +83,14 @@ async fn main() -> std::io::Result<()> {
         if let Some(token) = auth_token {
             set = set.with_auth_token(token);
         }
+        let access = access_service_token(
+            std::env::var("CF_ACCESS_CLIENT_ID").ok(),
+            std::env::var("CF_ACCESS_CLIENT_SECRET").ok(),
+        )
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         for (peer, peer_addr) in peers {
             println!("hub {name}: peer {peer} at {peer_addr}");
-            set.add(peer, hub::tcp_dialer(peer_addr))
+            set.add(peer, hub::peer_dialer(peer_addr, access.clone()))
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         }
         hub = hub.with_peers(set);
@@ -90,5 +115,28 @@ async fn main() -> std::io::Result<()> {
             std::io::ErrorKind::InvalidInput,
             "no address to listen on",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn access_service_tokens_must_be_a_nonempty_pair() {
+        assert!(access_service_token(None, None).unwrap().is_none());
+        assert!(
+            access_service_token(Some("id".into()), Some("secret".into()))
+                .unwrap()
+                .is_some()
+        );
+        for (id, secret) in [
+            (Some("id".into()), None),
+            (None, Some("secret".into())),
+            (Some(String::new()), Some("secret".into())),
+            (Some("id".into()), Some(String::new())),
+        ] {
+            assert!(access_service_token(id, secret).is_err());
+        }
     }
 }

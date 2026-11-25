@@ -226,3 +226,31 @@ bare/TCP addresses. Registration, callbacks, token authentication, and reconnect
 backoff are shared with TCP. Use WSS for direct public VPS endpoints; plain WS
 is for local/private links. Cloudflare Access service-token headers are not yet
 part of the node handshake.
+
+### Peer WebSocket dialing
+
+`HUB_PEERS` accepts WebSocket addresses alongside bare/TCP addresses:
+
+```sh
+HUB_NAME=pc
+HUB_PEERS=edger=wss://hub.example.com
+HUB_AUTH_TOKEN=<shared-hub-token>
+```
+
+The peer connection carries the same authenticated `ConsumerApi` lane,
+keepalive, reconnect backoff, topology, and one-hop routing as TCP. Configure
+each direction that needs topology or routed calls explicitly; dialing a peer
+does not register the reverse relationship or enable multi-hop routing.
+
+For a Cloudflare Access-protected endpoint, set both service-token values on the
+dialing hub. They are sent only as WebSocket handshake headers and are never
+logged:
+
+```sh
+CF_ACCESS_CLIENT_ID=<service-token-id>
+CF_ACCESS_CLIENT_SECRET=<service-token-secret>
+```
+
+Both must be nonempty and set together. A direct WSS endpoint without
+Cloudflare Access needs neither. Prefer WSS for public endpoints; plain
+`ws://` and bare/TCP addresses remain available for local or private networks.

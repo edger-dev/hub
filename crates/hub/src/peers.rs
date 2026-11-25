@@ -319,21 +319,62 @@ pub struct AccessServiceToken {
 }
 
 /// Select a peer transport from the address scheme.
+// implements: 8976aead0fb36e8b16db9819a9d18b7be09cc5cc6944143a063bd3e2c247b69f@8976aead0fb36e8b16db9819a9d18b7be09cc5cc6944143a063bd3e2c247b69f
 pub fn peer_dialer(addr: String, access: Option<AccessServiceToken>) -> Dialer {
-    let _ = (addr, access);
-    Arc::new(|| Box::pin(async { Err("peer WebSocket dialing is not implemented".into()) }))
+    if !matches!(addr.split_once("://"), Some(("ws" | "wss", _))) {
+        return tcp_dialer(addr);
+    }
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    Arc::new(move || {
+        let (addr, access) = (addr.clone(), access.clone());
+        Box::pin(async move {
+            let request = websocket_request(&addr, access.as_ref())?;
+            let (stream, _) = tokio::time::timeout(
+                Duration::from_secs(3),
+                tokio_tungstenite::connect_async(request),
+            )
+            .await
+            .map_err(|_| format!("{addr} did not answer"))?
+            .map_err(|error| format!("{addr}: {error}"))?;
+            vox::initiator_on(vox::transport::websocket::WsLink::new(stream))
+                .keepalive(vox::ConnectionKeepaliveConfig {
+                    ping_interval: KEEPALIVE,
+                    pong_timeout: KEEPALIVE,
+                })
+                .establish_connection()
+                .await
+                .map_err(|error| format!("{addr}: {error:?}"))
+        })
+    })
 }
 
-#[allow(dead_code)]
 fn websocket_request(
     addr: &str,
     access: Option<&AccessServiceToken>,
 ) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
-    let _ = access;
-    addr.into_client_request()
-        .map_err(|error| format!("invalid WebSocket URL: {error}"))
+    let mut request = addr
+        .into_client_request()
+        .map_err(|error| format!("invalid WebSocket URL: {error}"))?;
+    if let Some(access) = access {
+        for (name, value) in [
+            (
+                HeaderName::from_static("cf-access-client-id"),
+                access.id.as_str(),
+            ),
+            (
+                HeaderName::from_static("cf-access-client-secret"),
+                access.secret.as_str(),
+            ),
+        ] {
+            let value = HeaderValue::from_str(value)
+                .map_err(|error| format!("invalid Cloudflare Access credential: {error}"))?;
+            request.headers_mut().insert(name, value);
+        }
+    }
+    Ok(request)
 }
 
 /// A dialer for a peer hub at `addr` over TCP: three seconds to connect, and
