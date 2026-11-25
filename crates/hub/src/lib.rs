@@ -22,7 +22,7 @@ pub mod ws;
 pub use discovery::Subscribers;
 pub use events::EventSubscribers;
 pub use hub::Hub;
-pub use peers::{Dialer, Peers, parse_peers, tcp_dialer};
+pub use peers::{AccessServiceToken, Dialer, Peers, parse_peers, peer_dialer, tcp_dialer};
 pub use registry::{LinkEntry, Registry};
 pub use serve::{ServedHub, serve_connection};
 pub use tcp::{HubListener, serve_tcp};

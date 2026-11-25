@@ -11,6 +11,7 @@ workspace = true
 hub-protocol = { path = "../hub-protocol" }
 vox = { version = "0.10.0-rc.5", features = ["transport-websocket"] }
 tokio = { version = "1", features = ["sync", "net", "rt", "rt-multi-thread", "macros", "time"] }
+tokio-tungstenite = "0.29"
 
 [dev-dependencies]
 tempdir = "0.3"

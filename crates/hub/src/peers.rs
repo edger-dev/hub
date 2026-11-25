@@ -311,6 +311,31 @@ async fn wait_until(watching: &mut watch::Receiver<usize>, want: impl Fn(usize) 
     watching.wait_for(|n| want(*n)).await.is_ok()
 }
 
+/// A Cloudflare Access service token used during a peer WebSocket handshake.
+#[derive(Clone)]
+pub struct AccessServiceToken {
+    pub id: String,
+    pub secret: String,
+}
+
+/// Select a peer transport from the address scheme.
+pub fn peer_dialer(addr: String, access: Option<AccessServiceToken>) -> Dialer {
+    let _ = (addr, access);
+    Arc::new(|| Box::pin(async { Err("peer WebSocket dialing is not implemented".into()) }))
+}
+
+#[allow(dead_code)]
+fn websocket_request(
+    addr: &str,
+    access: Option<&AccessServiceToken>,
+) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, String> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    let _ = access;
+    addr.into_client_request()
+        .map_err(|error| format!("invalid WebSocket URL: {error}"))
+}
+
 /// A dialer for a peer hub at `addr` over TCP: three seconds to connect, and
 /// a keepalive so a peer that vanishes (power, network) is noticed.
 pub fn tcp_dialer(addr: String) -> Dialer {
@@ -356,4 +381,27 @@ pub fn parse_peers(spec: &str) -> Result<Vec<(String, String)>, String> {
         peers.push((name.to_string(), addr.to_string()));
     }
     Ok(peers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cloudflare_service_tokens_are_websocket_headers() {
+        let access = AccessServiceToken {
+            id: "client-id".into(),
+            secret: "client-secret".into(),
+        };
+        let request = websocket_request("wss://hub.example.com", Some(&access)).unwrap();
+        assert_eq!(request.headers()["cf-access-client-id"], "client-id");
+        assert_eq!(
+            request.headers()["cf-access-client-secret"],
+            "client-secret"
+        );
+
+        let plain = websocket_request("ws://127.0.0.1:15400", None).unwrap();
+        assert!(!plain.headers().contains_key("cf-access-client-id"));
+        assert!(!plain.headers().contains_key("cf-access-client-secret"));
+    }
 }

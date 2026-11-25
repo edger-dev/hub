@@ -637,6 +637,7 @@ dependencies = [
  "node",
  "tempdir",
  "tokio",
+ "tokio-tungstenite",
  "vox",
 ]
 
