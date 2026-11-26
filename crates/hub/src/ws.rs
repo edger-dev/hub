@@ -95,7 +95,7 @@ async fn request(socket: &mut TcpStream) -> io::Result<Request> {
         let mut parts = lines.next().unwrap_or_default().split_whitespace();
         let method = parts.next().unwrap_or_default();
         let path = parts.next().unwrap_or_default();
-        let upgrade = lines.any(|line| {
+        let upgrade = lines.take_while(|line| !line.is_empty()).any(|line| {
             line.split_once(':').is_some_and(|(name, value)| {
                 name.eq_ignore_ascii_case("upgrade")
                     && value.trim().eq_ignore_ascii_case("websocket")

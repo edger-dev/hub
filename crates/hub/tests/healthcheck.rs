@@ -31,6 +31,20 @@ async fn healthcheck_returns_ok_and_other_http_requires_websocket_upgrade() {
     .await;
     assert!(lookalike.starts_with("HTTP/1.1 426"), "{lookalike:?}");
 
+    let body = request(
+        addr,
+        b"GET / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 20\r\n\r\nUpgrade: websocket\r\n",
+    )
+    .await;
+    assert!(body.starts_with("HTTP/1.1 426"), "{body:?}");
+
+    let pipelined = request(
+        addr,
+        b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\nGET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n\r\n",
+    )
+    .await;
+    assert!(pipelined.starts_with("HTTP/1.1 426"), "{pipelined:?}");
+
     let large = format!(
         "GET /healthz HTTP/1.1\r\nHost: localhost\r\nX-Large: {}\r\n\r\n",
         "x".repeat(9000)
