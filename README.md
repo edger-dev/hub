@@ -219,6 +219,12 @@ forward to `http://127.0.0.1:15401`; the hub listener itself stays local. Keep
 `HUB_AUTH_TOKEN` configured. Native TLS termination in the hub is not part of
 this listener.
 
+`GET /healthz` returns `200 OK` with no topology, session, or credential data;
+use it for Caddy and uptime probes. Other ordinary non-WebSocket HTTP requests
+return `426 Upgrade Required`, rather than a misleading `502 Bad Gateway`. The
+probe is shallow: use an authenticated MCP `session_list` to verify peer
+discovery and a routed call to verify end-to-end delivery.
+
 ### Node WebSocket dialing
 
 Nodes accept `HUB_ADDR=ws://host:port` or `HUB_ADDR=wss://host:port` as well as
