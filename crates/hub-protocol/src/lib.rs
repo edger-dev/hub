@@ -18,6 +18,7 @@ pub mod identity;
 pub mod registration;
 pub mod routing;
 pub mod service;
+pub mod session;
 pub mod targeting;
 
 pub use connector::{Connector, ConnectorKind};
@@ -27,5 +28,8 @@ pub use events::{HubEvent, MAX_EVENT_PAYLOAD, SUBSCRIBED_TOPIC};
 pub use identity::{LinkLabel, NodeId, NodeLink, PEER_SEPARATOR};
 pub use registration::Registration;
 pub use routing::{RoutedCall, RoutedReply};
-pub use service::{ConsumerApi, NodeIngress, NodeService, PeerIngress, Pong};
+pub use service::{
+    ConsumerApi, NodeIngress, NodeService, PeerIngress, Pong, SessionIngress, SessionService,
+};
+pub use session::{MAX_SESSION_MESSAGE_BYTES, SessionInfo, SessionMessage};
 pub use targeting::LinkSelector;

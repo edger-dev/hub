@@ -1,12 +1,14 @@
 //! The vox service traits — the RPC surface each role dials.
 //!
-//! Four services, split by *who dials whom* so a peer only ever sees the
+//! Six services, split by *who dials whom* so a peer only ever sees the
 //! methods its role should call:
 //!
 //! - [`NodeIngress`] is dialed *into* the hub by a **node** that reverse-dials to
 //!   offer itself (§2.1, §2.4). Its one job is to register.
 //! - [`PeerIngress`] is dialed *into* the hub by a **peer hub** to register its
 //!   name and offer a reverse consumer lane over the same connection.
+//! - [`SessionIngress`] registers a live agent session; [`SessionService`] is
+//!   what the hub calls back to deliver an acknowledged direct message.
 //! - [`ConsumerApi`] is dialed *into* the hub by a **consumer** (the console or
 //!   the agent shim) to discover the mesh and route calls (§1, §2.6).
 //! - [`NodeService`] is what the hub dials back *toward a node*. The node answers
@@ -26,6 +28,7 @@ use crate::events::HubEvent;
 use crate::identity::NodeId;
 use crate::registration::Registration;
 use crate::routing::{RoutedCall, RoutedReply};
+use crate::session::{SessionInfo, SessionMessage};
 use crate::targeting::LinkSelector;
 
 /// A node's liveness answer — also the out-of-band deploy check (§5).
@@ -61,6 +64,17 @@ pub trait PeerIngress {
 
     /// Announce the dialing hub's name and offer a reverse consumer lane.
     async fn register(&self, peer: String) -> Result<(), HubError>;
+}
+
+/// Dialed into a hub by a live agent session.
+// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
+#[vox::service]
+pub trait SessionIngress {
+    /// Authenticate this connection before any other operation.
+    async fn authenticate(&self, token: String) -> Result<(), HubError>;
+
+    /// Register this connection's one session and its reverse delivery lane.
+    async fn register(&self, session: SessionInfo) -> Result<(), HubError>;
 }
 
 /// Dialed into the hub by a consumer — the console or the agent shim (§1, §2.6).
@@ -115,6 +129,27 @@ pub trait ConsumerApi {
     // implements: a297d880b240fa86f9872753ebc3009c0d3af0dd572ec9eaa2a17a3f815f8d45@55ffeceb39795324eb405923fdba976d6b9a2e959425e4dee7511dc681794e87
     async fn local_topology(&self) -> Result<TopologySnapshot, HubError>;
 
+    /// Live sessions on this hub and its one-hop peers, with qualified names.
+    async fn sessions(&self) -> Result<Vec<SessionInfo>, HubError>;
+
+    /// This hub's own live sessions, with no peer's — the peer-safe view.
+    async fn local_sessions(&self) -> Result<Vec<SessionInfo>, HubError>;
+
+    /// Send from this connection's registered session to a local or one-hop peer.
+    async fn send_session(
+        &self,
+        target: String,
+        message_id: String,
+        body: String,
+    ) -> Result<(), HubError>;
+
+    /// Forward an origin-qualified message from this connection's registered peer.
+    async fn forward_session(
+        &self,
+        target: String,
+        message: SessionMessage,
+    ) -> Result<(), HubError>;
+
     /// As [`ConsumerApi::subscribe_events`], but only events published to
     /// this hub itself, never one it carries from a peer — what a peer hub
     /// follows, so an event crosses one hop and never echoes back.
@@ -140,6 +175,14 @@ pub trait NodeService {
     async fn deliver(&self, call: RoutedCall) -> Result<RoutedReply, NodeError>;
 }
 
+/// Dialed by a hub toward its registered agent session.
+// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
+#[vox::service]
+pub trait SessionService {
+    /// Accept one message into the session's local mailbox before returning.
+    async fn deliver(&self, message: SessionMessage) -> Result<(), HubError>;
+}
+
 #[cfg(test)]
 mod tests {
     // The `#[vox::service]` macro generates a client + dispatcher per trait.
@@ -149,6 +192,8 @@ mod tests {
     use super::{
         ConsumerApiClient, ConsumerApiDispatcher, NodeIngressClient, NodeIngressDispatcher,
         NodeServiceClient, NodeServiceDispatcher, PeerIngressClient, PeerIngressDispatcher,
+        SessionIngressClient, SessionIngressDispatcher, SessionServiceClient,
+        SessionServiceDispatcher,
     };
 
     #[test]

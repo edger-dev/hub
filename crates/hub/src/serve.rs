@@ -270,6 +270,37 @@ impl ConsumerApi for ConsumerApiHandler {
         Ok(self.hub.snapshot().await)
     }
 
+    async fn sessions(&self) -> Result<Vec<hub_protocol::SessionInfo>, HubError> {
+        self.auth.check()?;
+        Ok(Vec::new())
+    }
+
+    async fn local_sessions(&self) -> Result<Vec<hub_protocol::SessionInfo>, HubError> {
+        self.auth.check()?;
+        Ok(Vec::new())
+    }
+
+    async fn send_session(
+        &self,
+        _target: String,
+        _message_id: String,
+        _body: String,
+    ) -> Result<(), HubError> {
+        Err(HubError::Rejected(
+            "session messaging is not implemented".into(),
+        ))
+    }
+
+    async fn forward_session(
+        &self,
+        _target: String,
+        _message: hub_protocol::SessionMessage,
+    ) -> Result<(), HubError> {
+        Err(HubError::Rejected(
+            "session messaging is not implemented".into(),
+        ))
+    }
+
     async fn subscribe_local_events(
         &self,
         prefix: String,

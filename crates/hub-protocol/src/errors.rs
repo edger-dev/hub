@@ -16,6 +16,8 @@ pub enum HubError {
     /// The node is connected but the requested link is absent and there is no
     /// `stable` link to fall back to (§2.5).
     UnknownLink,
+    /// No live agent session by that name is currently registered.
+    UnknownSession,
     /// The selected link's daemon did not accept the routed call.
     Rejected(String),
     /// An unexpected hub-side failure.
