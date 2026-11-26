@@ -146,7 +146,7 @@ impl WsHubListener {
                     connections.spawn(async move {
                         match request(&mut socket).await {
                             Ok(Request::Health) => {
-                                let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nok\n").await;
+                                let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nok\n").await;
                             }
                             Ok(Request::Other) | Err(_) => {
                                 let _ = socket.write_all(b"HTTP/1.1 426 Upgrade Required\r\nContent-Length: 19\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nwebsocket endpoint\n").await;

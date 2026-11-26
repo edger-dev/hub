@@ -19,6 +19,7 @@ async fn healthcheck_returns_ok_and_other_http_requires_websocket_upgrade() {
 
     let healthy = request(addr, b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n").await;
     assert!(healthy.starts_with("HTTP/1.1 200"), "{healthy:?}");
+    assert!(healthy.contains("\r\nContent-Length: 3\r\n"), "{healthy:?}");
     assert!(healthy.ends_with("ok\n"), "{healthy:?}");
 
     let upgrade = request(addr, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await;
