@@ -190,6 +190,51 @@ async fn a_session_reconnect_supersedes_without_letting_old_cleanup_win() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn duplicate_session_connections_fall_back_to_the_survivor() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let (_first, on_first, first_mailbox) = session(&public, info("a", "node-a")).await;
+    let (second, _on_second, second_mailbox) = session(&public, info("a", "node-a")).await;
+    let (_sender, on_sender, sender_mailbox) = session(&public, info("b", "node-b")).await;
+
+    let listed = on_sender.sessions().await.unwrap();
+    assert_eq!(listed.iter().filter(|session| session.id == "a").count(), 1);
+    on_sender
+        .send_session("a".into(), "newest".into(), "for the newest".into())
+        .await
+        .unwrap();
+    let mailbox = second_mailbox.clone();
+    eventually(move || {
+        let mailbox = mailbox.clone();
+        async move { !mailbox.messages.lock().unwrap().is_empty() }
+    })
+    .await;
+    assert!(first_mailbox.messages.lock().unwrap().is_empty());
+
+    let _ = second.shutdown();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    on_sender
+        .send_session("a".into(), "fallback".into(), "for the survivor".into())
+        .await
+        .unwrap();
+    let mailbox = first_mailbox.clone();
+    eventually(move || {
+        let mailbox = mailbox.clone();
+        async move { !mailbox.messages.lock().unwrap().is_empty() }
+    })
+    .await;
+    on_first
+        .send_session("b".into(), "reply".into(), "from the survivor".into())
+        .await
+        .unwrap();
+    let mailbox = sender_mailbox.clone();
+    eventually(move || {
+        let mailbox = mailbox.clone();
+        async move { !mailbox.messages.lock().unwrap().is_empty() }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_consumer_without_a_session_cannot_send() {
     let public = ServedHub::new();
     let connection = vox::initiator_on(attach(&public))
