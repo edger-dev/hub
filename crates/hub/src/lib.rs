@@ -16,6 +16,7 @@ pub mod hub;
 pub mod peers;
 pub mod registry;
 pub mod serve;
+mod sessions;
 pub mod tcp;
 pub mod ws;
 

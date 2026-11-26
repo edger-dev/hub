@@ -24,10 +24,11 @@ fn attach(hub: &ServedHub) -> vox::MemoryLink {
 
 /// A dialer reaching `remote` in memory and serving `local` on its reverse lane.
 fn dialer(remote: &ServedHub, local: &ServedHub) -> Dialer {
+    let peer = remote.peers().name().unwrap().to_string();
     let (remote, local) = (remote.clone(), local.clone());
     Arc::new(move || {
         let link = attach(&remote);
-        let acceptor = hub::serve::peer_consumer_acceptor(&local);
+        let acceptor = hub::serve::peer_consumer_acceptor(&local, &peer);
         Box::pin(async move {
             vox::initiator_on(link)
                 .on_lane(acceptor)
@@ -42,12 +43,13 @@ fn recording_dialer(
     remote: &ServedHub,
     local: &ServedHub,
 ) -> (Dialer, Arc<std::sync::Mutex<Vec<vox::ConnectionHandle>>>) {
+    let peer = remote.peers().name().unwrap().to_string();
     let (remote, local) = (remote.clone(), local.clone());
     let connections = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = Arc::clone(&connections);
     let dialer: Dialer = Arc::new(move || {
         let link = attach(&remote);
-        let acceptor = hub::serve::peer_consumer_acceptor(&local);
+        let acceptor = hub::serve::peer_consumer_acceptor(&local, &peer);
         let recorded = Arc::clone(&recorded);
         Box::pin(async move {
             let connection = vox::initiator_on(link)
@@ -586,7 +588,7 @@ async fn peers_reach_each_other_over_tcp() {
 
     let pc = ServedHub::new().with_peers(Peers::new("pc"));
     pc.peers()
-        .add("edger", hub::tcp_dialer(&pc, edger_addr))
+        .add("edger", hub::tcp_dialer(&pc, "edger", edger_addr))
         .unwrap();
     let dir = tempdir::TempDir::new("peers-tcp").unwrap();
     let _yolo = node_on(&edger, "yolo", dir.path()).await;

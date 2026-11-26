@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hub_protocol::service::{ConsumerApiClient, PeerIngressClient};
-use hub_protocol::{HubEvent, NodeInfo, PEER_SEPARATOR, TopologySnapshot};
+use hub_protocol::{HubEvent, NodeInfo, PEER_SEPARATOR, SessionInfo, TopologySnapshot};
 use tokio::sync::{mpsc, watch};
 use vox::ConnectionHandle;
 
@@ -318,6 +318,34 @@ impl Peers {
         nodes
     }
 
+    /// Every reachable peer's live local sessions, qualified one hop away.
+    pub async fn sessions(&self) -> Vec<SessionInfo> {
+        let mut asks = tokio::task::JoinSet::new();
+        for peer in self.names() {
+            let Some(client) = self.client(&peer).await else {
+                continue;
+            };
+            asks.spawn(async move {
+                match tokio::time::timeout(TOPOLOGY_WAIT, client.local_sessions()).await {
+                    Ok(Ok(sessions)) => sessions
+                        .into_iter()
+                        .map(|mut session| {
+                            session.qualify(&peer);
+                            session
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                }
+            });
+        }
+        let mut sessions = Vec::new();
+        while let Some(Ok(theirs)) = asks.join_next().await {
+            sessions.extend(theirs);
+        }
+        sessions.sort_by(|a, b| a.id.cmp(&b.id));
+        sessions
+    }
+
     /// Carry `peer`'s own events into the hub's fan-out while anyone here
     /// follows events: one subscription per peer, whatever the number of
     /// subscribers, resubscribed (with backoff) whenever it ends.
@@ -397,18 +425,19 @@ pub struct AccessServiceToken {
 // implements: 8976aead0fb36e8b16db9819a9d18b7be09cc5cc6944143a063bd3e2c247b69f@3e9c1d8f725914bc1b2f86f165ff7badbf38f05f153e0505f11b0cc7da37eede
 pub fn peer_dialer(
     hub: &crate::ServedHub,
+    peer: &str,
     addr: String,
     access: Option<AccessServiceToken>,
 ) -> Dialer {
     if !matches!(addr.split_once("://"), Some(("ws" | "wss", _))) {
-        return tcp_dialer(hub, addr);
+        return tcp_dialer(hub, peer, addr);
     }
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let hub = hub.clone();
+    let (hub, peer) = (hub.clone(), peer.to_string());
     Arc::new(move || {
-        let (addr, access, hub) = (addr.clone(), access.clone(), hub.clone());
+        let (addr, access, hub, peer) = (addr.clone(), access.clone(), hub.clone(), peer.clone());
         Box::pin(async move {
-            let acceptor = crate::serve::peer_consumer_acceptor(&hub);
+            let acceptor = crate::serve::peer_consumer_acceptor(&hub, &peer);
             let request = websocket_request(&addr, access.as_ref())?;
             let (stream, _) = tokio::time::timeout(
                 Duration::from_secs(3),
@@ -461,12 +490,12 @@ fn websocket_request(
 
 /// A dialer for a peer hub at `addr` over TCP: three seconds to connect, and
 /// a keepalive so a peer that vanishes (power, network) is noticed.
-pub fn tcp_dialer(hub: &crate::ServedHub, addr: String) -> Dialer {
-    let hub = hub.clone();
+pub fn tcp_dialer(hub: &crate::ServedHub, peer: &str, addr: String) -> Dialer {
+    let (hub, peer) = (hub.clone(), peer.to_string());
     Arc::new(move || {
-        let (addr, hub) = (addr.clone(), hub.clone());
+        let (addr, hub, peer) = (addr.clone(), hub.clone(), peer.clone());
         Box::pin(async move {
-            let acceptor = crate::serve::peer_consumer_acceptor(&hub);
+            let acceptor = crate::serve::peer_consumer_acceptor(&hub, &peer);
             let socket = tokio::time::timeout(
                 Duration::from_secs(3),
                 tokio::net::TcpStream::connect(addr.as_str()),

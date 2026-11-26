@@ -13,6 +13,7 @@ use crate::discovery::Subscribers;
 use crate::events::EventSubscribers;
 use crate::peers::{Carried, Peers};
 use crate::registry::Registry;
+use crate::sessions::Sessions;
 
 /// Shared hub state, cloneable across connection tasks.
 ///
@@ -25,6 +26,7 @@ pub struct Hub<T> {
     events: Arc<Mutex<EventSubscribers>>,
     /// This hub's name and its peer hubs.
     peers: Peers,
+    sessions: Sessions,
     auth_token: Option<std::sync::Arc<str>>,
 }
 
@@ -39,6 +41,7 @@ impl<T> Clone for Hub<T> {
             inner: Arc::clone(&self.inner),
             events: Arc::clone(&self.events),
             peers: self.peers.clone(),
+            sessions: self.sessions.clone(),
             auth_token: self.auth_token.clone(),
         }
     }
@@ -60,6 +63,7 @@ impl<T: Clone> Hub<T> {
             })),
             events: Arc::new(Mutex::new(EventSubscribers::new())),
             peers: Peers::default(),
+            sessions: Sessions::default(),
             auth_token: None,
         }
     }
@@ -120,6 +124,32 @@ impl<T: Clone> Hub<T> {
     /// The live topology (§2.6).
     pub async fn snapshot(&self) -> TopologySnapshot {
         self.inner.lock().await.registry.snapshot()
+    }
+
+    pub(crate) fn register_session(
+        &self,
+        info: hub_protocol::SessionInfo,
+        client: hub_protocol::service::SessionServiceClient,
+    ) -> Result<u64, HubError> {
+        self.sessions.register(info, client)
+    }
+
+    pub(crate) fn unregister_session(&self, id: &str, registration: u64) {
+        self.sessions.unregister(id, registration);
+    }
+
+    pub(crate) fn local_sessions(&self) -> Vec<hub_protocol::SessionInfo> {
+        self.sessions.snapshot()
+    }
+
+    pub(crate) fn session_client(
+        &self,
+        id: &str,
+    ) -> Option<(
+        hub_protocol::SessionInfo,
+        hub_protocol::service::SessionServiceClient,
+    )> {
+        self.sessions.client(id)
     }
 
     /// Attach a consumer to the live topology tail (§2.6).

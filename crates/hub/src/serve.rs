@@ -14,11 +14,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use hub_protocol::service::{
     ConsumerApiClient, ConsumerApiDispatcher, NodeIngressDispatcher, NodeServiceClient,
-    PeerIngressDispatcher,
+    PeerIngressDispatcher, SessionIngressDispatcher, SessionServiceClient,
 };
 use hub_protocol::{
     ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink, PeerIngress, Registration,
-    RouteError, RoutedCall, RoutedReply, TopologyEvent, TopologySnapshot,
+    RouteError, RoutedCall, RoutedReply, SessionInfo, SessionIngress, SessionMessage,
+    TopologyEvent, TopologySnapshot,
 };
 use tokio::sync::{Mutex, watch};
 use vox::{ConnectionHandle, Link, Tx};
@@ -135,6 +136,17 @@ enum ReverseRegistration {
     Closed,
 }
 
+enum SessionRegistration {
+    Open(Option<(SessionInfo, u64)>),
+    Closed,
+}
+
+#[derive(Clone)]
+enum ConsumerPeer {
+    Registered(Arc<Mutex<ReverseRegistration>>),
+    Configured(String),
+}
+
 /// Handles `PeerIngress` for one peer connection.
 #[derive(Clone)]
 struct PeerIngressHandler {
@@ -206,11 +218,147 @@ impl PeerIngress for PeerIngressHandler {
     }
 }
 
+/// Handles `SessionIngress` for one session connection.
+#[derive(Clone)]
+struct SessionIngressHandler {
+    hub: ServedHub,
+    connection: watch::Receiver<Option<ConnectionHandle>>,
+    registered: Arc<Mutex<SessionRegistration>>,
+    auth: ConnectionAuth,
+}
+
+impl SessionIngressHandler {
+    async fn connection(&self) -> Result<ConnectionHandle, HubError> {
+        let mut rx = self.connection.clone();
+        loop {
+            if let Some(handle) = rx.borrow().clone() {
+                return Ok(handle);
+            }
+            if rx.changed().await.is_err() {
+                return Err(HubError::Internal(
+                    "connection closed before it was published".to_string(),
+                ));
+            }
+        }
+    }
+}
+
+// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
+impl SessionIngress for SessionIngressHandler {
+    async fn authenticate(&self, token: String) -> Result<(), HubError> {
+        self.auth.authenticate(token)
+    }
+
+    async fn register(&self, session: SessionInfo) -> Result<(), HubError> {
+        self.auth.check()?;
+        let mut registered = self.registered.lock().await;
+        match &*registered {
+            SessionRegistration::Closed => {
+                return Err(HubError::Rejected("session connection is closed".into()));
+            }
+            SessionRegistration::Open(Some(_)) => {
+                return Err(HubError::Rejected(
+                    "session connection already registered a session".into(),
+                ));
+            }
+            SessionRegistration::Open(None) => {}
+        }
+        let connection = self.connection().await?;
+        let client: SessionServiceClient = connection.open_lane().await.map_err(|error| {
+            HubError::Internal(format!("could not open SessionService lane: {error:?}"))
+        })?;
+        let registration = self.hub.register_session(session.clone(), client)?;
+        *registered = SessionRegistration::Open(Some((session, registration)));
+        Ok(())
+    }
+}
+
 /// Handles `ConsumerApi` for one consumer connection.
 #[derive(Clone)]
 struct ConsumerApiHandler {
     hub: ServedHub,
     auth: ConnectionAuth,
+    session: Option<Arc<Mutex<SessionRegistration>>>,
+    peer: Option<ConsumerPeer>,
+}
+
+impl ConsumerApiHandler {
+    async fn session_sender(&self) -> Result<SessionInfo, HubError> {
+        let Some(session) = &self.session else {
+            return Err(HubError::Rejected(
+                "this connection has no registered session".into(),
+            ));
+        };
+        match &*session.lock().await {
+            SessionRegistration::Open(Some((info, _))) => Ok(info.clone()),
+            _ => Err(HubError::Rejected(
+                "this connection has no live registered session".into(),
+            )),
+        }
+    }
+
+    async fn peer_name(&self) -> Result<String, HubError> {
+        match self.peer.as_ref() {
+            Some(ConsumerPeer::Configured(name)) => Ok(name.clone()),
+            Some(ConsumerPeer::Registered(registration)) => match &*registration.lock().await {
+                ReverseRegistration::Open(Some((name, _))) => Ok(name.clone()),
+                _ => Err(HubError::Rejected("peer registration is not live".into())),
+            },
+            None => Err(HubError::Rejected(
+                "this connection has no registered peer".into(),
+            )),
+        }
+    }
+
+    fn validate_message(message: &SessionMessage) -> Result<(), HubError> {
+        if message.id.is_empty() {
+            return Err(HubError::Rejected("message id must not be empty".into()));
+        }
+        if message.body.len() > hub_protocol::MAX_SESSION_MESSAGE_BYTES {
+            return Err(HubError::Rejected(format!(
+                "message body is over {} bytes",
+                hub_protocol::MAX_SESSION_MESSAGE_BYTES
+            )));
+        }
+        Ok(())
+    }
+
+    async fn deliver_local(&self, target: String, message: SessionMessage) -> Result<(), HubError> {
+        let Some((_, client)) = self.hub.session_client(&target) else {
+            return Err(HubError::UnknownSession);
+        };
+        client.deliver(message).await.map_err(|error| match error {
+            vox::VoxError::User(error) => *error,
+            other => HubError::Rejected(format!("session {target}: {other:?}")),
+        })
+    }
+
+    async fn send_to_peer(
+        &self,
+        peer: String,
+        target: String,
+        mut message: SessionMessage,
+    ) -> Result<(), HubError> {
+        let Some(origin) = self.hub.peers().name().map(str::to_owned) else {
+            return Err(HubError::Rejected(
+                "cross-hub session messages need this hub to have a name".into(),
+            ));
+        };
+        message.from.qualify(&origin);
+        let client = self
+            .hub
+            .peers()
+            .client(&peer)
+            .await
+            .ok_or(HubError::UnknownSession)?;
+        client
+            .forward_session(target, message)
+            .await
+            .map_err(|error| match error {
+                vox::VoxError::User(error) => *error,
+                other => HubError::Rejected(format!("peer hub {peer}: {other:?}")),
+            })
+    }
 }
 
 impl ConsumerApi for ConsumerApiHandler {
@@ -272,33 +420,70 @@ impl ConsumerApi for ConsumerApiHandler {
 
     async fn sessions(&self) -> Result<Vec<hub_protocol::SessionInfo>, HubError> {
         self.auth.check()?;
-        Ok(Vec::new())
+        let mut sessions = self.hub.local_sessions();
+        sessions.extend(self.hub.peers().sessions().await);
+        sessions.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(sessions)
     }
 
     async fn local_sessions(&self) -> Result<Vec<hub_protocol::SessionInfo>, HubError> {
         self.auth.check()?;
-        Ok(Vec::new())
+        Ok(self.hub.local_sessions())
     }
 
+    // implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
     async fn send_session(
         &self,
-        _target: String,
-        _message_id: String,
-        _body: String,
+        target: String,
+        message_id: String,
+        body: String,
     ) -> Result<(), HubError> {
-        Err(HubError::Rejected(
-            "session messaging is not implemented".into(),
-        ))
+        self.auth.check()?;
+        let message = SessionMessage {
+            id: message_id,
+            from: self.session_sender().await?,
+            body,
+        };
+        Self::validate_message(&message)?;
+        if let Some((peer, local)) = target.split_once(hub_protocol::PEER_SEPARATOR) {
+            if Some(peer) == self.hub.peers().name() {
+                return self.deliver_local(local.to_string(), message).await;
+            }
+            if local.contains(hub_protocol::PEER_SEPARATOR) {
+                return Err(HubError::UnknownSession);
+            }
+            self.send_to_peer(peer.to_string(), local.to_string(), message)
+                .await
+        } else {
+            self.deliver_local(target, message).await
+        }
     }
 
     async fn forward_session(
         &self,
-        _target: String,
-        _message: hub_protocol::SessionMessage,
+        target: String,
+        message: hub_protocol::SessionMessage,
     ) -> Result<(), HubError> {
-        Err(HubError::Rejected(
-            "session messaging is not implemented".into(),
-        ))
+        self.auth.check()?;
+        Self::validate_message(&message)?;
+        let peer = self.peer_name().await?;
+        let prefix = format!("{peer}{}", hub_protocol::PEER_SEPARATOR);
+        let valid_sender = [&message.from.id, &message.from.node]
+            .into_iter()
+            .all(|value| {
+                value.strip_prefix(&prefix).is_some_and(|rest| {
+                    !rest.is_empty() && !rest.contains(hub_protocol::PEER_SEPARATOR)
+                })
+            });
+        if !valid_sender {
+            return Err(HubError::Rejected(
+                "forwarded sender does not belong to the registered peer".into(),
+            ));
+        }
+        if target.contains(hub_protocol::PEER_SEPARATOR) {
+            return Err(HubError::UnknownSession);
+        }
+        self.deliver_local(target, message).await
     }
 
     async fn subscribe_local_events(
@@ -366,10 +551,12 @@ impl ConsumerApi for ConsumerApiHandler {
 
 /// Serve this hub's `ConsumerApi` on an outbound peer connection, so the peer
 /// can open its reverse lane immediately after `PeerIngress` registration.
-pub fn peer_consumer_acceptor(hub: &ServedHub) -> impl vox::LaneAcceptor {
+pub fn peer_consumer_acceptor(hub: &ServedHub, peer: &str) -> impl vox::LaneAcceptor {
     let handler = ConsumerApiHandler {
         hub: hub.clone(),
         auth: ConnectionAuth::new(hub.auth_token()),
+        session: None,
+        peer: Some(ConsumerPeer::Configured(peer.to_string())),
     };
     vox::lane_acceptor_fn(move |request: &vox::LaneRequest, lane: vox::PendingLane| {
         if request.service() != "ConsumerApi" {
@@ -414,6 +601,7 @@ where
     let (publish, connection) = watch::channel(None);
     let registered = Arc::new(Mutex::new(None));
     let registered_peer = Arc::new(Mutex::new(ReverseRegistration::Open(None)));
+    let registered_session = Arc::new(Mutex::new(SessionRegistration::Open(None)));
     let auth = ConnectionAuth::new(hub.auth_token());
 
     let node_handler = NodeIngressHandler {
@@ -428,9 +616,17 @@ where
         registered: Arc::clone(&registered_peer),
         auth: auth.clone(),
     };
+    let session_handler = SessionIngressHandler {
+        hub: hub.clone(),
+        connection: connection.clone(),
+        registered: Arc::clone(&registered_session),
+        auth: auth.clone(),
+    };
     let consumer_handler = ConsumerApiHandler {
         hub: hub.clone(),
         auth,
+        session: Some(Arc::clone(&registered_session)),
+        peer: Some(ConsumerPeer::Registered(Arc::clone(&registered_peer))),
     };
 
     let acceptor = vox::lane_acceptor_fn(
@@ -444,6 +640,10 @@ where
                 }
                 "PeerIngress" => {
                     lane.handle_with(PeerIngressDispatcher::new(peer_handler.clone()));
+                    Ok(())
+                }
+                "SessionIngress" => {
+                    lane.handle_with(SessionIngressDispatcher::new(session_handler.clone()));
                     Ok(())
                 }
                 "ConsumerApi" => {
@@ -478,6 +678,13 @@ where
     );
     if let ReverseRegistration::Open(Some((peer, registration))) = reverse {
         hub.peers().unregister_reverse(&peer, registration);
+    }
+    let session = std::mem::replace(
+        &mut *registered_session.lock().await,
+        SessionRegistration::Closed,
+    );
+    if let SessionRegistration::Open(Some((session, registration))) = session {
+        hub.unregister_session(&session.id, registration);
     }
     Ok(())
 }

@@ -29,10 +29,11 @@ fn attach(hub: &ServedHub) -> vox::MemoryLink {
 }
 
 fn peer_dialer(remote: &ServedHub, local: &ServedHub) -> Dialer {
+    let peer = remote.peers().name().unwrap().to_string();
     let (remote, local) = (remote.clone(), local.clone());
     Arc::new(move || {
         let link = attach(&remote);
-        let acceptor = hub::serve::peer_consumer_acceptor(&local);
+        let acceptor = hub::serve::peer_consumer_acceptor(&local, &peer);
         Box::pin(async move {
             vox::initiator_on(link)
                 .on_lane(acceptor)
@@ -142,6 +143,57 @@ async fn sessions_list_message_and_reply_across_one_outbound_peer() {
 
     assert!(
         on_a.send_session("hub::missing".into(), "m3".into(), "nobody".into())
+            .await
+            .is_err()
+    );
+    assert!(
+        on_a.send_session("hub::edger::a".into(), "m4".into(), "two hops".into())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_reconnect_supersedes_without_letting_old_cleanup_win() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let (first, _on_first, first_mailbox) = session(&public, info("a", "node-a")).await;
+    let (second, _on_second, second_mailbox) = session(&public, info("a", "node-a")).await;
+    let (_sender, on_sender, _sender_mailbox) = session(&public, info("b", "node-b")).await;
+
+    let _ = first.shutdown();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    on_sender
+        .send_session("a".into(), "after-reconnect".into(), "current".into())
+        .await
+        .unwrap();
+    let mailbox = second_mailbox.clone();
+    eventually(move || {
+        let mailbox = mailbox.clone();
+        async move { !mailbox.messages.lock().unwrap().is_empty() }
+    })
+    .await;
+    assert!(first_mailbox.messages.lock().unwrap().is_empty());
+
+    let second_ingress: SessionIngressClient = second.open_lane().await.unwrap();
+    assert!(
+        second_ingress
+            .register(info("other", "node-b"))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_consumer_without_a_session_cannot_send() {
+    let public = ServedHub::new();
+    let connection = vox::initiator_on(attach(&public))
+        .establish_connection()
+        .await
+        .unwrap();
+    let consumer: ConsumerApiClient = connection.open_lane().await.unwrap();
+    assert!(
+        consumer
+            .send_session("anyone".into(), "m".into(), "forged".into())
             .await
             .is_err()
     );

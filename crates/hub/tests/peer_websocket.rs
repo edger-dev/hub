@@ -61,7 +61,7 @@ async fn a_peer_carries_topology_and_routed_calls_over_websocket() {
     pc.peers()
         .add(
             "edger",
-            peer_dialer(&pc, format!("ws://{edger_addr}"), None),
+            peer_dialer(&pc, "edger", format!("ws://{edger_addr}"), None),
         )
         .unwrap();
     let _pc_server = tokio::spawn(listener.serve(pc.clone()));

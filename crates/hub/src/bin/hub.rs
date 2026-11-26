@@ -97,7 +97,10 @@ async fn main() -> std::io::Result<()> {
                 name.as_deref().unwrap_or("unnamed")
             );
             hub.peers()
-                .add(peer, hub::peer_dialer(&hub, peer_addr, access.clone()))
+                .add(
+                    peer.clone(),
+                    hub::peer_dialer(&hub, &peer, peer_addr, access.clone()),
+                )
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         }
     }

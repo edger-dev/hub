@@ -261,3 +261,17 @@ CF_ACCESS_CLIENT_SECRET=<service-token-secret>
 Both must be nonempty and set together. A direct WSS endpoint without
 Cloudflare Access needs neither. Prefer WSS for public endpoints; plain
 `ws://` and bare/TCP addresses remain available for local or private networks.
+
+## Live session messaging
+
+Agent shims authenticate through `SessionIngress`, register one live session,
+and serve `SessionService` on the same connection. Consumers use `sessions` for
+local plus one-hop peer sessions, or `local_sessions` for the peer-safe view.
+A peer's session and node names are both qualified as `<peer>::<id>`.
+
+`send_session` derives its sender from the connection's authenticated session
+registration and acknowledges only after the target accepts the message into
+its local mailbox. Hubs forward to peers with `forward_session`, which accepts
+only the origin prefix belonging to the authenticated peer. Unknown or offline
+sessions fail visibly. Messages are live-only: the hub retains no offline queue
+or history, and multi-hop targets are refused.
