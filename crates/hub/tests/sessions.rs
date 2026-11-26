@@ -192,10 +192,29 @@ async fn a_session_reconnect_supersedes_without_letting_old_cleanup_win() {
 #[tokio::test(flavor = "multi_thread")]
 async fn duplicate_session_connections_fall_back_to_the_survivor() {
     let public = ServedHub::new().with_peers(Peers::new("hub"));
-    let (_first, on_first, first_mailbox) = session(&public, info("a", "node-a")).await;
-    let (second, _on_second, second_mailbox) = session(&public, info("a", "node-a")).await;
+    let mut first_info = info("a", "node-a");
+    first_info.workspace = "first".into();
+    let (_first, on_first, first_mailbox) = session(&public, first_info).await;
     let (_sender, on_sender, sender_mailbox) = session(&public, info("b", "node-b")).await;
+    on_sender
+        .send_session("a".into(), "initial".into(), "for the first".into())
+        .await
+        .unwrap();
+    let mailbox = first_mailbox.clone();
+    eventually(move || {
+        let mailbox = mailbox.clone();
+        async move { !mailbox.messages.lock().unwrap().is_empty() }
+    })
+    .await;
+    on_sender
+        .send_session("a".into(), "initial-2".into(), "for the first again".into())
+        .await
+        .unwrap();
+    first_mailbox.messages.lock().unwrap().clear();
 
+    let mut second_info = info("a", "node-a");
+    second_info.workspace = "second".into();
+    let (second, _on_second, second_mailbox) = session(&public, second_info).await;
     let listed = on_sender.sessions().await.unwrap();
     assert_eq!(listed.iter().filter(|session| session.id == "a").count(), 1);
     on_sender
@@ -210,8 +229,27 @@ async fn duplicate_session_connections_fall_back_to_the_survivor() {
     .await;
     assert!(first_mailbox.messages.lock().unwrap().is_empty());
 
-    let _ = second.shutdown();
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    drop(_on_second);
+    second.shutdown().unwrap();
+    drop(second);
+    let on_sender_for_fallback = on_sender.clone();
+    eventually(move || {
+        let on_sender = on_sender_for_fallback.clone();
+        async move {
+            on_sender
+                .sessions()
+                .await
+                .unwrap()
+                .iter()
+                .any(|session| session.id == "a" && session.workspace == "first")
+        }
+    })
+    .await;
+    let first_view = on_first.sessions().await.unwrap();
+    assert!(
+        first_view.iter().any(|session| session.id == "a"),
+        "{first_view:?}"
+    );
     on_sender
         .send_session("a".into(), "fallback".into(), "for the survivor".into())
         .await

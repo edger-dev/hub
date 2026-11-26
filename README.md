@@ -275,6 +275,12 @@ and serve `SessionService` on the same connection. Consumers use `sessions` for
 local plus one-hop peer sessions, or `local_sessions` for the peer-safe view.
 A peer's session and node names are both qualified as `<peer>::<id>`.
 
+Several MCP clients belonging to one agent may register the same logical session
+id. Listing shows one entry; the newest registration is current, and disconnecting
+it falls back to the newest surviving registration. Receivers must use a shared
+mailbox when they share an id, so delivery through any registration remains
+retrievable by the agent.
+
 `send_session` derives its sender from the connection's authenticated session
 registration and acknowledges only after the target accepts the message into
 its local mailbox. Hubs forward to peers with `forward_session`, which accepts

@@ -1,6 +1,6 @@
 //! Live agent sessions, registered by their own connections.
 //!
-//! implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
+//! implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@b6936c5b4bf599c582c8c986e716b9a763d5df72b5a8594423bdc25a94092501
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,7 +19,7 @@ struct Entry {
 /// The live local session registry; peers read it through `local_sessions`.
 #[derive(Clone)]
 pub(crate) struct Sessions {
-    entries: Arc<Mutex<BTreeMap<String, Entry>>>,
+    entries: Arc<Mutex<BTreeMap<String, BTreeMap<u64, Entry>>>>,
     next_registration: Arc<AtomicU64>,
 }
 
@@ -59,8 +59,10 @@ impl Sessions {
         self.entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(info.id.clone())
+            .or_default()
             .insert(
-                info.id.clone(),
+                registration,
                 Entry {
                     info,
                     client,
@@ -75,10 +77,11 @@ impl Sessions {
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if entries
-            .get(id)
-            .is_some_and(|entry| entry.registration == registration)
-        {
+        let empty = entries.get_mut(id).is_some_and(|registrations| {
+            registrations.remove(&registration);
+            registrations.is_empty()
+        });
+        if empty {
             entries.remove(id);
         }
     }
@@ -88,7 +91,8 @@ impl Sessions {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
-            .map(|entry| entry.info.clone())
+            .filter_map(|registrations| registrations.last_key_value())
+            .map(|(_, entry)| entry.info.clone())
             .collect()
     }
 
@@ -97,7 +101,8 @@ impl Sessions {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(id)
-            .is_some_and(|entry| entry.registration == registration)
+            .and_then(|registrations| registrations.last_key_value())
+            .is_some_and(|(_, entry)| entry.registration == registration)
     }
 
     pub(crate) fn client(&self, id: &str) -> Option<(SessionInfo, SessionServiceClient)> {
@@ -105,6 +110,7 @@ impl Sessions {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(id)
-            .map(|entry| (entry.info.clone(), entry.client.clone()))
+            .and_then(|registrations| registrations.last_key_value())
+            .map(|(_, entry)| (entry.info.clone(), entry.client.clone()))
     }
 }

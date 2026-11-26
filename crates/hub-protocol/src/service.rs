@@ -67,7 +67,7 @@ pub trait PeerIngress {
 }
 
 /// Dialed into a hub by a live agent session.
-// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
+// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@b6936c5b4bf599c582c8c986e716b9a763d5df72b5a8594423bdc25a94092501
 #[vox::service]
 pub trait SessionIngress {
     /// Authenticate this connection before any other operation.
@@ -176,7 +176,7 @@ pub trait NodeService {
 }
 
 /// Dialed by a hub toward its registered agent session.
-// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
+// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@b6936c5b4bf599c582c8c986e716b9a763d5df72b5a8594423bdc25a94092501
 #[vox::service]
 pub trait SessionService {
     /// Accept one message into the session's local mailbox before returning.
