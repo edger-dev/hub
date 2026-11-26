@@ -156,10 +156,16 @@ async fn sessions_list_message_and_reply_across_one_outbound_peer() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_reconnect_supersedes_without_letting_old_cleanup_win() {
     let public = ServedHub::new().with_peers(Peers::new("hub"));
-    let (first, _on_first, first_mailbox) = session(&public, info("a", "node-a")).await;
+    let (first, on_first, first_mailbox) = session(&public, info("a", "node-a")).await;
     let (second, _on_second, second_mailbox) = session(&public, info("a", "node-a")).await;
     let (_sender, on_sender, _sender_mailbox) = session(&public, info("b", "node-b")).await;
 
+    assert!(
+        on_first
+            .send_session("b".into(), "superseded".into(), "forged".into())
+            .await
+            .is_err()
+    );
     let _ = first.shutdown();
     tokio::time::sleep(Duration::from_millis(200)).await;
     on_sender

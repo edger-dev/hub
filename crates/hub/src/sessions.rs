@@ -90,6 +90,14 @@ impl Sessions {
             .collect()
     }
 
+    pub(crate) fn is_current(&self, id: &str, registration: u64) -> bool {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+            .is_some_and(|entry| entry.registration == registration)
+    }
+
     pub(crate) fn client(&self, id: &str) -> Option<(SessionInfo, SessionServiceClient)> {
         self.entries
             .lock()

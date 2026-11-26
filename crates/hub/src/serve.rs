@@ -290,7 +290,11 @@ impl ConsumerApiHandler {
             ));
         };
         match &*session.lock().await {
-            SessionRegistration::Open(Some((info, _))) => Ok(info.clone()),
+            SessionRegistration::Open(Some((info, registration)))
+                if self.hub.session_is_current(&info.id, *registration) =>
+            {
+                Ok(info.clone())
+            }
             _ => Err(HubError::Rejected(
                 "this connection has no live registered session".into(),
             )),
@@ -301,7 +305,11 @@ impl ConsumerApiHandler {
         match self.peer.as_ref() {
             Some(ConsumerPeer::Configured(name)) => Ok(name.clone()),
             Some(ConsumerPeer::Registered(registration)) => match &*registration.lock().await {
-                ReverseRegistration::Open(Some((name, _))) => Ok(name.clone()),
+                ReverseRegistration::Open(Some((name, generation)))
+                    if self.hub.peers().reverse_is_current(name, *generation) =>
+                {
+                    Ok(name.clone())
+                }
                 _ => Err(HubError::Rejected("peer registration is not live".into())),
             },
             None => Err(HubError::Rejected(

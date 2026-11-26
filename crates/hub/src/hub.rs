@@ -142,6 +142,10 @@ impl<T: Clone> Hub<T> {
         self.sessions.snapshot()
     }
 
+    pub(crate) fn session_is_current(&self, id: &str, registration: u64) -> bool {
+        self.sessions.is_current(id, registration)
+    }
+
     pub(crate) fn session_client(
         &self,
         id: &str,

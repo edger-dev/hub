@@ -190,6 +190,17 @@ impl Peers {
         });
     }
 
+    pub(crate) fn reverse_is_current(&self, peer: &str, registration: u64) -> bool {
+        self.with(|peers| {
+            peers.iter().any(|existing| {
+                existing.name == peer
+                    && !existing.configured
+                    && existing.client.is_some()
+                    && existing.registration == registration
+            })
+        })
+    }
+
     fn validate_name(&self, peer: &str) -> Result<(), String> {
         if Some(peer) == self.name() {
             return Err(format!("peer {peer:?} is this hub's own name"));
