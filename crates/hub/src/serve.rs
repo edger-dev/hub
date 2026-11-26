@@ -31,7 +31,7 @@ use crate::hub::Hub;
 pub type ServedHub = Hub<NodeServiceClient>;
 
 /// Connection-scoped authentication, shared by both inbound audiences.
-// implements: hub::spec::connection-auth@ba5249130cbe8cd98be07ca92c54f376871ffdc54fbb85f4f580996a3fbd427b
+// implements: hub::spec::connection-auth@0c8154a9705d32e7755f1fdbd4cb30bbf3150d28cc0e961c7553b54d15890f2b
 #[derive(Clone)]
 struct ConnectionAuth {
     required: Option<Arc<str>>,

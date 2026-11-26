@@ -1,4 +1,6 @@
 //! Live agent sessions, registered by their own connections.
+//!
+//! implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
