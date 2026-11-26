@@ -1,0 +1,3 @@
+{"@schema":"kinora-commit-archive-v1"}
+{"event_kind":"store","kind":"markdown","id":"476776853392a6a97d0831ba5991341bb2f68f91e3a2cfc9adb0ca375a83146c","hash":"476776853392a6a97d0831ba5991341bb2f68f91e3a2cfc9adb0ca375a83146c","parents":[],"ts":"2026-11-26T13:45:36.588665025Z","author":"YJ Park","provenance":"kimi-code","metadata":{"name":"hub::spec::websocket-healthcheck"}}
+{"event_kind":"assign","kind":"kin::assign","id":"476776853392a6a97d0831ba5991341bb2f68f91e3a2cfc9adb0ca375a83146c","hash":"476776853392a6a97d0831ba5991341bb2f68f91e3a2cfc9adb0ca375a83146c","parents":[],"ts":"2026-11-26T13:45:36.588665025Z","author":"YJ Park","provenance":"kimi-code","metadata":{"kin::target_root":"specs"}}
