@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 facet = "0.50.0-rc.5"
+ring = "0.17"
 vox = "0.10.0-rc.5"
 
 [dev-dependencies]

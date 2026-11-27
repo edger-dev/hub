@@ -10,6 +10,7 @@
 //!
 //! task: c6178132314d68a977b50be334976aa0ab5a22547331573f4dea0ef61027048b
 
+pub mod auth;
 pub mod connector;
 pub mod discovery;
 pub mod errors;
@@ -21,6 +22,7 @@ pub mod service;
 pub mod session;
 pub mod targeting;
 
+pub use auth::{AuthChallenge, AuthProof, SigningKey, TrustStore};
 pub use connector::{Connector, ConnectorKind};
 pub use discovery::{LinkInfo, NodeInfo, TopologyEvent, TopologySnapshot};
 pub use errors::{HubError, NodeError, RouteError};
