@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use hub_protocol::service::{ConsumerApiClient, DiagnosticsApiClient, PeerIngressClient};
 use hub_protocol::{
-    HubEvent, NodeInfo, PEER_SEPARATOR, PeerDiagnostic, SessionInfo, TopologySnapshot,
+    DiagnosticStatus, HubEvent, NodeInfo, PEER_SEPARATOR, PeerDiagnostic, SessionInfo,
+    TopologySnapshot,
 };
 use tokio::sync::{mpsc, watch};
 use vox::ConnectionHandle;
@@ -217,22 +218,52 @@ impl Peers {
         })
     }
 
-    pub(crate) async fn diagnostics_client(&self, peer: &str) -> Option<DiagnosticsApiClient> {
-        let handle = self.with(|peers| {
+    pub(crate) async fn diagnostics_client(
+        &self,
+        peer: &str,
+    ) -> Result<DiagnosticsApiClient, (DiagnosticStatus, String)> {
+        let Some(handle) = self.with(|peers| {
             peers
                 .iter()
                 .find(|existing| existing.name == peer)
                 .and_then(|existing| existing.handle.clone())
+        }) else {
+            return Err((
+                DiagnosticStatus::Failed,
+                format!("peer {peer:?} is not live"),
+            ));
+        };
+        let client: DiagnosticsApiClient = handle.open_lane().await.map_err(|error| {
+            (
+                DiagnosticStatus::Unsupported,
+                format!("DiagnosticsApi is unsupported: {error:?}"),
+            )
         })?;
-        let client: DiagnosticsApiClient = handle.open_lane().await.ok()?;
         if let Some(key) = &self.signing_key {
-            let challenge = client.authentication_challenge().await.ok()?;
-            let proof = key.sign(&challenge).ok()?;
-            client.authenticate_key(proof).await.ok()?;
+            let challenge = client.authentication_challenge().await.map_err(|error| {
+                (
+                    DiagnosticStatus::Unsupported,
+                    format!("diagnostic authentication is unsupported: {error:?}"),
+                )
+            })?;
+            let proof = key
+                .sign(&challenge)
+                .map_err(|error| (DiagnosticStatus::Failed, error))?;
+            client.authenticate_key(proof).await.map_err(|error| {
+                (
+                    DiagnosticStatus::Failed,
+                    format!("diagnostic authentication failed: {error:?}"),
+                )
+            })?;
         } else if let Some(token) = &self.auth_token {
-            client.authenticate(token.clone()).await.ok()?;
+            client.authenticate(token.clone()).await.map_err(|error| {
+                (
+                    DiagnosticStatus::Failed,
+                    format!("diagnostic authentication failed: {error:?}"),
+                )
+            })?;
         }
-        Some(client)
+        Ok(client)
     }
 
     /// Clear a reverse registration only if its connection is still current.

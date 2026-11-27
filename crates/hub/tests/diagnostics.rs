@@ -112,7 +112,15 @@ async fn diagnostics_probe_local_unknown_and_disconnected_targets() {
         .unwrap();
     let ingress: PeerIngressClient = connection.open_lane().await.unwrap();
     ingress.register("edger".into()).await.unwrap();
+    drop(ingress);
+    connection.shutdown().unwrap();
     drop(connection);
+    for _ in 0..100 {
+        if public.peers().client("edger").await.is_none() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     let report = diagnostics
         .session_probe("edger::a".into(), "disconnected".into())
         .await

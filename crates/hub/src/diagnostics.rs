@@ -92,13 +92,16 @@ impl DiagnosticsApi for DiagnosticsApiHandler {
                 });
                 return Ok(self.complete(started, report));
             }
-            let Some(client) = self.hub.peers().diagnostics_client(peer).await else {
-                report.checks.push(DiagnosticCheck {
-                    stage: "peer".into(),
-                    status: DiagnosticStatus::Failed,
-                    detail: format!("peer {peer:?} is not live"),
-                });
-                return Ok(self.complete(started, report));
+            let client = match self.hub.peers().diagnostics_client(peer).await {
+                Ok(client) => client,
+                Err((status, detail)) => {
+                    report.checks.push(DiagnosticCheck {
+                        stage: "peer".into(),
+                        status,
+                        detail,
+                    });
+                    return Ok(self.complete(started, report));
+                }
             };
             report.checks.push(DiagnosticCheck {
                 stage: "peer".into(),
