@@ -44,6 +44,19 @@ in
       description = "Optional environment file containing secrets such as HUB_AUTH_TOKEN.";
     };
 
+    trustFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Public peer keys and role grants; contains no secrets.";
+    };
+
+    privateKeyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/run/secrets/hub.key";
+      description = "This peer's private Ed25519 key, passed through systemd credentials.";
+    };
+
     name = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -73,6 +86,10 @@ in
       }
       // lib.optionalAttrs (cfg.peers != { }) {
         HUB_PEERS = lib.concatStringsSep "," (lib.mapAttrsToList (n: a: "${n}=${a}") cfg.peers);
+      } // lib.optionalAttrs (cfg.trustFile != null) {
+        HUB_TRUST_FILE = cfg.trustFile;
+      } // lib.optionalAttrs (cfg.privateKeyFile != null) {
+        HUB_PRIVATE_KEY_FILE = "%d/hub-private-key";
       };
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/hub";
@@ -80,6 +97,8 @@ in
         RestartSec = 2;
         DynamicUser = true;
         EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile;
+        LoadCredential = lib.optional (cfg.privateKeyFile != null)
+          "hub-private-key:${cfg.privateKeyFile}";
       };
       # Binding a bridge address can race the bridge coming up; keep retrying.
       startLimitIntervalSec = 0;

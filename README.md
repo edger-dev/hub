@@ -195,15 +195,32 @@ Hub acts as a credential broker for sandboxed agents. Coordinators request token
 
 ## Connection authentication
 
-Set `HUB_AUTH_TOKEN` on the hub, nodes, peer hubs, and consumers to require that
-exact token before any registration, topology read, subscription, publication,
-or routed call. Missing or incorrect credentials are refused; a correct token
-authenticates only that connection. An empty token is a startup error, and an
-unset token preserves existing behavior.
+Each peer has its own Ed25519 keypair. Create one with `hub keygen PEER PATH`,
+which writes the private key with mode `0600` and prints its public key and
+fingerprint. Set `HUB_PRIVATE_KEY_FILE` on hubs, nodes, and consumers, and set
+`HUB_TRUST_FILE` on each hub to a public trust file containing one peer, public
+key, and comma-separated roles per line:
 
-The token is read from the environment and is never logged or accepted as a
-command-line argument. It authenticates but does not encrypt traffic, so remote
+```text
+hub <hub-public-key> peer,consumer
+edger <edger-public-key> peer,node,session,consumer
+yolo <yolo-public-key> node,session,consumer
+```
+
+The hub issues a fresh single-use, 60-second nonce for each service lane. The
+peer signs the hub name, role, peer identity, key fingerprint, and nonce. A node,
+peer hub, or session can register only the identity proven by that signature.
+Reverse peer consumer lanes authenticate in the opposite direction with the
+other hub's key. Repeat a peer line with a second public key during rotation.
+
+Private keys are read from protected files and never logged. Public trust files
+contain no secrets. Signatures authenticate but do not encrypt traffic, so remote
 connections must remain on a private or separately encrypted network.
+
+For migration, `HUB_AUTH_TOKEN` still enables the previous shared-token check
+alongside signatures. After every peer is enrolled, remove the token and its
+environment file. With neither trust nor token configured, existing local
+behavior is unchanged.
 
 ## WebSocket listener
 
