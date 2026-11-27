@@ -17,8 +17,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use hub_protocol::service::{ConsumerApiClient, PeerIngressClient};
-use hub_protocol::{HubEvent, NodeInfo, PEER_SEPARATOR, SessionInfo, TopologySnapshot};
+use hub_protocol::service::{ConsumerApiClient, DiagnosticsApiClient, PeerIngressClient};
+use hub_protocol::{
+    HubEvent, NodeInfo, PEER_SEPARATOR, PeerDiagnostic, SessionInfo, TopologySnapshot,
+};
 use tokio::sync::{mpsc, watch};
 use vox::ConnectionHandle;
 
@@ -39,6 +41,7 @@ const KEEPALIVE: Duration = Duration::from_secs(10);
 struct Peer {
     name: String,
     client: Option<ConsumerApiClient>,
+    handle: Option<ConnectionHandle>,
     configured: bool,
     registration: u64,
 }
@@ -128,10 +131,11 @@ impl Peers {
         f(&mut peers)
     }
 
-    fn set(&self, peer: &str, client: Option<ConsumerApiClient>) {
+    fn set(&self, peer: &str, client: Option<ConsumerApiClient>, handle: Option<ConnectionHandle>) {
         self.with(|peers| {
             if let Some(p) = peers.iter_mut().find(|p| p.name == peer) {
                 p.client = client;
+                p.handle = handle;
             }
         });
     }
@@ -162,6 +166,7 @@ impl Peers {
         &self,
         peer: &str,
         client: ConsumerApiClient,
+        handle: ConnectionHandle,
     ) -> Result<u64, String> {
         self.validate_name(peer)?;
         let registration = self.next_registration.fetch_add(1, Ordering::Relaxed);
@@ -171,12 +176,14 @@ impl Peers {
                     return Err(format!("peer {peer:?} is already configured"));
                 }
                 existing.client = Some(client);
+                existing.handle = Some(handle);
                 existing.registration = registration;
                 return Ok(false);
             }
             peers.push(Peer {
                 name: peer.to_string(),
                 client: Some(client),
+                handle: Some(handle),
                 configured: false,
                 registration,
             });
@@ -190,6 +197,36 @@ impl Peers {
         Ok(registration)
     }
 
+    pub(crate) fn diagnostics(&self) -> Vec<PeerDiagnostic> {
+        self.with(|peers| {
+            peers
+                .iter()
+                .map(|peer| PeerDiagnostic {
+                    name: peer.name.clone(),
+                    direction: if peer.configured {
+                        "outbound"
+                    } else {
+                        "reverse"
+                    }
+                    .into(),
+                    registration: peer.registration,
+                    current: peer.client.is_some() && peer.handle.is_some(),
+                    last_error: None,
+                })
+                .collect()
+        })
+    }
+
+    pub(crate) async fn diagnostics_client(&self, peer: &str) -> Option<DiagnosticsApiClient> {
+        let handle = self.with(|peers| {
+            peers
+                .iter()
+                .find(|existing| existing.name == peer)
+                .and_then(|existing| existing.handle.clone())
+        })?;
+        handle.open_lane().await.ok()
+    }
+
     /// Clear a reverse registration only if its connection is still current.
     pub(crate) fn unregister_reverse(&self, peer: &str, registration: u64) {
         self.with(|peers| {
@@ -198,6 +235,7 @@ impl Peers {
                 && existing.registration == registration
             {
                 existing.client = None;
+                existing.handle = None;
             }
         });
     }
@@ -237,6 +275,7 @@ impl Peers {
             peers.push(Peer {
                 name: peer.clone(),
                 client: None,
+                handle: None,
                 configured: true,
                 registration: 0,
             });
@@ -295,10 +334,10 @@ impl Peers {
                                         let _ = ingress.register(local_name).await;
                                     }
                                 }
-                                peers.set(&name, Some(client));
+                                peers.set(&name, Some(client), Some(handle.clone()));
                                 wait = Duration::from_secs(1);
                                 handle.closed().await;
-                                peers.set(&name, None);
+                                peers.set(&name, None, None);
                             } else {
                                 let _ = handle.shutdown();
                             }

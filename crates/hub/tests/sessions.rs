@@ -13,6 +13,10 @@ struct Mailbox {
 }
 
 impl SessionService for Mailbox {
+    async fn ping(&self) -> Result<SessionInfo, HubError> {
+        Ok(info("session", "node-a"))
+    }
+
     async fn deliver(&self, message: SessionMessage) -> Result<(), HubError> {
         self.messages.lock().unwrap().push(message);
         Ok(())

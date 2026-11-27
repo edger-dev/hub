@@ -23,9 +23,7 @@
 use vox::Tx;
 
 use crate::auth::{AuthChallenge, AuthProof};
-use crate::diagnostics::{
-    DiagnosticCapabilities, DiagnosticReport, PeerDiagnostic,
-};
+use crate::diagnostics::{DiagnosticCapabilities, DiagnosticReport, PeerDiagnostic};
 use crate::discovery::{TopologyEvent, TopologySnapshot};
 use crate::errors::{HubError, NodeError, RouteError};
 use crate::events::HubEvent;

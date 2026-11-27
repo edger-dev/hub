@@ -2,21 +2,30 @@
 
 use hub::{Peers, ServedHub, serve_connection};
 use hub_protocol::service::{
-    DiagnosticsApiClient, PeerIngressClient, SessionIngressClient,
-    SessionServiceDispatcher,
+    DiagnosticsApiClient, PeerIngressClient, SessionIngressClient, SessionServiceDispatcher,
 };
-use hub_protocol::{
-    DiagnosticStatus, HubError, SessionInfo, SessionMessage, SessionService,
-};
+use hub_protocol::{DiagnosticStatus, HubError, SessionInfo, SessionMessage, SessionService};
+
+#[derive(Clone, Copy)]
+enum Behavior {
+    Ok,
+    Unsupported,
+    Hang,
+}
 
 #[derive(Clone)]
 struct Mailbox {
     info: SessionInfo,
+    behavior: Behavior,
 }
 
 impl SessionService for Mailbox {
     async fn ping(&self) -> Result<SessionInfo, HubError> {
-        Ok(self.info.clone())
+        match self.behavior {
+            Behavior::Ok => Ok(self.info.clone()),
+            Behavior::Unsupported => Err(HubError::Rejected("unknown-method".into())),
+            Behavior::Hang => std::future::pending().await,
+        }
     }
 
     async fn deliver(&self, _message: SessionMessage) -> Result<(), HubError> {
@@ -43,8 +52,22 @@ fn info(id: &str) -> SessionInfo {
     }
 }
 
-async fn session(hub: &ServedHub, info: SessionInfo) -> (vox::ConnectionHandle, DiagnosticsApiClient) {
-    let mailbox = Mailbox { info: info.clone() };
+async fn session(
+    hub: &ServedHub,
+    info: SessionInfo,
+) -> (vox::ConnectionHandle, DiagnosticsApiClient) {
+    session_with(hub, info, Behavior::Ok).await
+}
+
+async fn session_with(
+    hub: &ServedHub,
+    info: SessionInfo,
+    behavior: Behavior,
+) -> (vox::ConnectionHandle, DiagnosticsApiClient) {
+    let mailbox = Mailbox {
+        info: info.clone(),
+        behavior,
+    };
     let connection = vox::initiator_on(attach(hub))
         .on_lane(SessionServiceDispatcher::new(mailbox))
         .establish_connection()
@@ -81,7 +104,9 @@ async fn diagnostics_probe_local_unknown_and_disconnected_targets() {
     assert_eq!(report.status, DiagnosticStatus::Failed, "{report:?}");
     assert!(report.checks.iter().any(|check| check.stage == "target"));
 
+    let edger = ServedHub::new().with_peers(Peers::new("edger"));
     let connection = vox::initiator_on(attach(&public))
+        .on_lane(hub::serve::peer_consumer_acceptor(&edger, "edger"))
         .establish_connection()
         .await
         .unwrap();
@@ -94,4 +119,27 @@ async fn diagnostics_probe_local_unknown_and_disconnected_targets() {
         .unwrap();
     assert_eq!(report.status, DiagnosticStatus::Failed, "{report:?}");
     assert!(report.checks.iter().any(|check| check.stage == "peer"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_distinguishes_unsupported_and_timeout() {
+    let public = ServedHub::new().with_peers(Peers::new("hub"));
+    let (_old, old_diagnostics) = session_with(&public, info("old"), Behavior::Unsupported).await;
+    let report = old_diagnostics
+        .session_probe("old".into(), "old".into())
+        .await
+        .unwrap();
+    assert_eq!(report.status, DiagnosticStatus::Unsupported, "{report:?}");
+
+    let (_hung, hung_diagnostics) = session_with(&public, info("hung"), Behavior::Hang).await;
+    let started = std::time::Instant::now();
+    let report = hung_diagnostics
+        .session_probe("hung".into(), "hung".into())
+        .await
+        .unwrap();
+    assert_eq!(report.status, DiagnosticStatus::Unknown, "{report:?}");
+    assert!(started.elapsed() >= std::time::Duration::from_secs(2));
+    let rendered = format!("{report:?}");
+    assert!(!rendered.contains("HUB_AUTH_TOKEN"));
+    assert!(!rendered.contains("private_key"));
 }

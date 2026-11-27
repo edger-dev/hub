@@ -14,6 +14,16 @@ use node::{HubEndpoint, NodeConfig};
 struct Mailbox;
 
 impl SessionService for Mailbox {
+    async fn ping(&self) -> Result<SessionInfo, HubError> {
+        Ok(SessionInfo {
+            id: "session".into(),
+            node: "yolo".into(),
+            harness: "test".into(),
+            workspace: "/work".into(),
+            context: None,
+        })
+    }
+
     async fn deliver(&self, _message: SessionMessage) -> Result<(), HubError> {
         Ok(())
     }

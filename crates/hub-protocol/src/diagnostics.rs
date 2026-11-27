@@ -49,6 +49,27 @@ impl DiagnosticReport {
     }
 
     pub fn finish(mut self) -> Self {
+        self.status = if self
+            .checks
+            .iter()
+            .any(|check| check.status == DiagnosticStatus::Failed)
+        {
+            DiagnosticStatus::Failed
+        } else if self
+            .checks
+            .iter()
+            .any(|check| check.status == DiagnosticStatus::Unsupported)
+        {
+            DiagnosticStatus::Unsupported
+        } else if self
+            .checks
+            .iter()
+            .any(|check| check.status == DiagnosticStatus::Unknown)
+        {
+            DiagnosticStatus::Unknown
+        } else {
+            DiagnosticStatus::Ok
+        };
         self
     }
 }

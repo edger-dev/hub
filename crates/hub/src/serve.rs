@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use hub_protocol::service::{
-    ConsumerApiClient, ConsumerApiDispatcher, NodeIngressDispatcher, NodeServiceClient,
-    PeerIngressDispatcher, SessionIngressDispatcher, SessionServiceClient,
+    ConsumerApiClient, ConsumerApiDispatcher, DiagnosticsApiDispatcher, NodeIngressDispatcher,
+    NodeServiceClient, PeerIngressDispatcher, SessionIngressDispatcher, SessionServiceClient,
 };
 use hub_protocol::{
     AuthChallenge, AuthProof, ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink,
@@ -33,7 +33,7 @@ pub type ServedHub = Hub<NodeServiceClient>;
 /// Connection-scoped authentication, shared by both inbound audiences.
 // implements: hub::spec::connection-auth@bd6ac42fe5e75451450c5183ae1892b19f92c718138de69e222e428197d940bd
 #[derive(Clone)]
-struct ConnectionAuth {
+pub(crate) struct ConnectionAuth {
     required: Option<Arc<str>>,
     trust: hub_protocol::TrustStore,
     authenticated: Arc<AtomicBool>,
@@ -42,7 +42,7 @@ struct ConnectionAuth {
 }
 
 impl ConnectionAuth {
-    fn new(required: Option<Arc<str>>, trust: hub_protocol::TrustStore) -> Self {
+    pub(crate) fn new(required: Option<Arc<str>>, trust: hub_protocol::TrustStore) -> Self {
         Self {
             authenticated: Arc::new(AtomicBool::new(required.is_none() && trust.is_empty())),
             required,
@@ -52,7 +52,7 @@ impl ConnectionAuth {
         }
     }
 
-    fn authenticate(&self, token: String) -> Result<(), HubError> {
+    pub(crate) fn authenticate(&self, token: String) -> Result<(), HubError> {
         if self.required.as_deref() == Some(token.as_str()) {
             self.authenticated.store(true, Ordering::Release);
             Ok(())
@@ -63,7 +63,7 @@ impl ConnectionAuth {
         }
     }
 
-    async fn challenge(&self, hub: &str, role: &str) -> Result<AuthChallenge, HubError> {
+    pub(crate) async fn challenge(&self, hub: &str, role: &str) -> Result<AuthChallenge, HubError> {
         if self.trust.is_empty() {
             return Err(HubError::Rejected(
                 "key authentication is not configured".into(),
@@ -77,7 +77,11 @@ impl ConnectionAuth {
         Ok(challenge)
     }
 
-    async fn authenticate_key(&self, role: &str, proof: AuthProof) -> Result<(), HubError> {
+    pub(crate) async fn authenticate_key(
+        &self,
+        role: &str,
+        proof: AuthProof,
+    ) -> Result<(), HubError> {
         let Some((issued, challenge)) = self.challenges.lock().await.remove(role) else {
             return Err(HubError::Rejected(
                 "authentication challenge required".into(),
@@ -97,7 +101,7 @@ impl ConnectionAuth {
         Ok(())
     }
 
-    async fn check(&self) -> Result<Option<String>, HubError> {
+    pub(crate) async fn check(&self) -> Result<Option<String>, HubError> {
         if self.authenticated.load(Ordering::Acquire) {
             Ok(self.peer.lock().await.clone())
         } else {
@@ -105,7 +109,7 @@ impl ConnectionAuth {
         }
     }
 
-    async fn check_identity(&self, expected: &str) -> Result<(), HubError> {
+    pub(crate) async fn check_identity(&self, expected: &str) -> Result<(), HubError> {
         if self.check().await?.is_some_and(|peer| peer != expected) {
             return Err(HubError::Rejected(format!(
                 "authenticated peer cannot register {expected:?}"
@@ -292,7 +296,7 @@ impl PeerIngress for PeerIngressHandler {
         let registration = self
             .hub
             .peers()
-            .register_reverse(&peer, client)
+            .register_reverse(&peer, client, connection.clone())
             .map_err(HubError::Rejected)?;
         *registered = ReverseRegistration::Open(Some((peer, registration)));
         Ok(())
@@ -737,6 +741,7 @@ where
         session: Some(Arc::clone(&registered_session)),
         peer: Some(ConsumerPeer::Registered(Arc::clone(&registered_peer))),
     };
+    let diagnostics_handler = crate::diagnostics::DiagnosticsApiHandler::new(hub.clone());
 
     let acceptor = vox::lane_acceptor_fn(
         move |request: &vox::LaneRequest,
@@ -757,6 +762,10 @@ where
                 }
                 "ConsumerApi" => {
                     lane.handle_with(ConsumerApiDispatcher::new(consumer_handler.clone()));
+                    Ok(())
+                }
+                "DiagnosticsApi" => {
+                    lane.handle_with(DiagnosticsApiDispatcher::new(diagnostics_handler.clone()));
                     Ok(())
                 }
                 _ => Err(vox::LaneRejection::new(
