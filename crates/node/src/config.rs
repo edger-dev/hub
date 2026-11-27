@@ -60,6 +60,7 @@ pub struct NodeConfig {
     pub connectors: Vec<Connector>,
     pub agent_version: String,
     pub auth_token: Option<String>,
+    pub signing_key: Option<std::sync::Arc<hub_protocol::SigningKey>>,
 }
 
 impl NodeConfig {
@@ -80,12 +81,19 @@ impl NodeConfig {
             connectors,
             agent_version,
             auth_token: None,
+            signing_key: None,
         })
     }
 
     /// Authenticate to the hub with this token before registering.
     pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
         self.auth_token = Some(token.into());
+        self
+    }
+
+    /// Authenticate to the hub with this per-peer signing key.
+    pub fn with_signing_key(mut self, key: hub_protocol::SigningKey) -> Self {
+        self.signing_key = Some(std::sync::Arc::new(key));
         self
     }
 

@@ -1,9 +1,23 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use hub::{HubListener, ServedHub};
-use hub_protocol::service::{ConsumerApiClient, PeerIngressClient, SessionIngressClient};
-use hub_protocol::{LinkLabel, NodeId, SessionInfo, SigningKey, TrustStore};
+use hub_protocol::service::{
+    ConsumerApiClient, PeerIngressClient, SessionIngressClient, SessionServiceDispatcher,
+};
+use hub_protocol::{
+    HubError, LinkLabel, NodeId, SessionInfo, SessionMessage, SessionService, SigningKey,
+    TrustStore,
+};
 use node::{HubEndpoint, NodeConfig};
+
+#[derive(Clone, Default)]
+struct Mailbox;
+
+impl SessionService for Mailbox {
+    async fn deliver(&self, _message: SessionMessage) -> Result<(), HubError> {
+        Ok(())
+    }
+}
 
 async fn consumer(addr: &str) -> ConsumerApiClient {
     let socket = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -126,6 +140,7 @@ async fn signed_auth_binds_identity_and_rejects_replay() {
 
     let socket = tokio::net::TcpStream::connect(&addr).await.unwrap();
     let connection = vox::initiator_on(vox::transport::tcp::StreamLink::tcp(socket))
+        .on_lane(SessionServiceDispatcher::new(Mailbox))
         .establish_connection()
         .await
         .unwrap();
@@ -150,4 +165,41 @@ async fn signed_auth_binds_identity_and_rejects_replay() {
         })
         .await
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn signed_peers_authenticate_both_directions() {
+    let hub_key = SigningKey::generate("hub").unwrap();
+    let edger_key = SigningKey::generate("edger").unwrap();
+    let mut public_trust = TrustStore::default();
+    public_trust
+        .add("edger", &edger_key.public_hex(), &["peer", "consumer"])
+        .unwrap();
+    let mut edger_trust = TrustStore::default();
+    edger_trust
+        .add("hub", &hub_key.public_hex(), &["peer", "consumer"])
+        .unwrap();
+
+    let public = ServedHub::new()
+        .with_auth_trust(public_trust)
+        .with_peers(hub::Peers::new("hub").with_signing_key(hub_key));
+    let listener = HubListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().to_string();
+    let _server = tokio::spawn(listener.serve(public.clone()));
+    let edger = ServedHub::new()
+        .with_auth_trust(edger_trust)
+        .with_peers(hub::Peers::new("edger").with_signing_key(edger_key));
+    edger
+        .peers()
+        .add("hub", hub::tcp_dialer(&edger, "hub", addr))
+        .unwrap();
+
+    for _ in 0..100 {
+        if let Some(client) = public.peers().client("edger").await {
+            client.topology().await.unwrap();
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("signed reverse peer lane was not established");
 }

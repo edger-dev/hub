@@ -54,6 +54,7 @@ pub struct Peers {
     /// Where carried events go: the hub's fan-out, set by the hub.
     sink: Arc<Mutex<Option<mpsc::Sender<Carried>>>>,
     auth_token: Option<String>,
+    signing_key: Option<Arc<hub_protocol::SigningKey>>,
     next_registration: Arc<AtomicU64>,
 }
 
@@ -73,6 +74,7 @@ impl Default for Peers {
             watchers: Arc::new(watch::channel(0).0),
             sink: Arc::default(),
             auth_token: None,
+            signing_key: None,
             next_registration: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -101,6 +103,16 @@ impl Peers {
     pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
         self.auth_token = Some(token.into());
         self
+    }
+
+    /// Sign outbound and reverse peer authentication with this key.
+    pub fn with_signing_key(mut self, key: hub_protocol::SigningKey) -> Self {
+        self.signing_key = Some(Arc::new(key));
+        self
+    }
+
+    pub fn signing_key(&self) -> Option<Arc<hub_protocol::SigningKey>> {
+        self.signing_key.clone()
     }
 
     /// This hub's name, when it has one.
