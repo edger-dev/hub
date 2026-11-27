@@ -56,7 +56,7 @@ impl ConnectionAuth {
         if self.required.as_deref() == Some(token.as_str()) {
             self.authenticated.store(true, Ordering::Release);
             Ok(())
-        } else if self.required.is_none() {
+        } else if self.required.is_none() && self.trust.is_empty() {
             Ok(())
         } else {
             Err(HubError::Rejected("invalid authentication token".into()))

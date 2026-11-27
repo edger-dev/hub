@@ -132,6 +132,7 @@ async fn signed_auth_binds_identity_and_rejects_replay() {
 
     let consumer = consumer(&addr).await;
     assert!(consumer.topology().await.is_err());
+    assert!(consumer.authenticate("not-a-key".into()).await.is_err());
     let challenge = consumer.authentication_challenge().await.unwrap();
     let proof = key.sign(&challenge).unwrap();
     consumer.authenticate_key(proof.clone()).await.unwrap();
