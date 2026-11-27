@@ -23,6 +23,9 @@
 use vox::Tx;
 
 use crate::auth::{AuthChallenge, AuthProof};
+use crate::diagnostics::{
+    DiagnosticCapabilities, DiagnosticReport, PeerDiagnostic,
+};
 use crate::discovery::{TopologyEvent, TopologySnapshot};
 use crate::errors::{HubError, NodeError, RouteError};
 use crate::events::HubEvent;
@@ -204,6 +207,9 @@ pub trait NodeService {
 // implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@b6936c5b4bf599c582c8c986e716b9a763d5df72b5a8594423bdc25a94092501
 #[vox::service]
 pub trait SessionService {
+    /// Answer identity without touching the mailbox.
+    async fn ping(&self) -> Result<SessionInfo, HubError>;
+
     /// Accept one message into the session's local mailbox before returning.
     async fn deliver(&self, message: SessionMessage) -> Result<(), HubError>;
 }
@@ -239,4 +245,21 @@ mod tests {
         let back: Pong = facet_json::from_str(&json).unwrap();
         assert_eq!(v, back);
     }
+}
+
+/// Authenticated diagnostic introspection and real session probes.
+// implements: hub::spec::session-diagnostics@0ed7d0e7b10814c751b8b3303cb9572a2f0b34b7c0047b49ac805c19d0e55033
+#[vox::service]
+pub trait DiagnosticsApi {
+    async fn authenticate(&self, token: String) -> Result<(), HubError>;
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError>;
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError>;
+
+    async fn capabilities(&self) -> Result<DiagnosticCapabilities, HubError>;
+    async fn peer_diagnostics(&self) -> Result<Vec<PeerDiagnostic>, HubError>;
+    async fn session_probe(
+        &self,
+        target: String,
+        probe_id: String,
+    ) -> Result<DiagnosticReport, HubError>;
 }
