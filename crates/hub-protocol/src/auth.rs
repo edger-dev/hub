@@ -93,6 +93,16 @@ impl SigningKey {
             .map_err(|error| format!("invalid Ed25519 private key: {error}"))
     }
 
+    pub fn from_private_file(
+        peer: impl Into<String>,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, String> {
+        let path = path.as_ref();
+        let private = std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read private key {}: {error}", path.display()))?;
+        Self::from_private_hex(peer, &private)
+    }
+
     pub fn private_hex(&self) -> String {
         encode_hex(&self.seed)
     }
@@ -154,6 +164,35 @@ impl TrustStore {
         }
         trusted.keys.insert(key_id, public);
         Ok(())
+    }
+
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let mut trust = Self::default();
+        for (index, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let [peer, public, roles] = fields.as_slice() else {
+                return Err(format!(
+                    "trust line {} must be `peer public-key role,…`",
+                    index + 1
+                ));
+            };
+            let roles: Vec<&str> = roles.split(',').collect();
+            trust
+                .add(peer, public, &roles)
+                .map_err(|error| format!("trust line {}: {error}", index + 1))?;
+        }
+        Ok(trust)
+    }
+
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
+        let path = path.as_ref();
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read trust file {}: {error}", path.display()))?;
+        Self::parse(&text)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -218,7 +257,7 @@ fn encode_hex(bytes: &[u8]) -> String {
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
     let text = text.trim();
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return Err("hex key material must have an even length".into());
     }
     text.as_bytes()

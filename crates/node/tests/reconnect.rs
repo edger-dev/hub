@@ -11,7 +11,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hub_protocol::service::NodeIngressDispatcher;
-use hub_protocol::{HubError, LinkLabel, NodeId, NodeIngress, Registration};
+use hub_protocol::{
+    AuthChallenge, AuthProof, HubError, LinkLabel, NodeId, NodeIngress, Registration,
+};
 use node::reconnect::{Backoff, DialOutcome};
 use node::{HubEndpoint, NodeConfig};
 
@@ -24,6 +26,14 @@ struct CountingHub {
 impl NodeIngress for CountingHub {
     async fn authenticate(&self, _token: String) -> Result<(), HubError> {
         Ok(())
+    }
+
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
+        Err(HubError::Rejected("not used by this test".into()))
+    }
+
+    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
+        Err(HubError::Rejected("not used by this test".into()))
     }
 
     async fn register(&self, registration: Registration) -> Result<(), HubError> {

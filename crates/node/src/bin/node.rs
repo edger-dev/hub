@@ -23,6 +23,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Vec::new(),
         env!("CARGO_PKG_VERSION").to_string(),
     )?;
+    let config = match std::env::var("HUB_PRIVATE_KEY_FILE") {
+        Ok(path) => {
+            let key = hub_protocol::SigningKey::from_private_file(config.node.0.clone(), path)?;
+            config.with_signing_key(key)
+        }
+        Err(_) => config,
+    };
     let config = match std::env::var("HUB_AUTH_TOKEN") {
         Ok(token) => config.with_auth_token(token),
         Err(_) => config,

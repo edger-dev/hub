@@ -37,8 +37,35 @@ fn access_service_token(
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let addr = std::env::args()
-        .nth(1)
+    let mut args = std::env::args().skip(1);
+    let first = args.next();
+    if first.as_deref() == Some("keygen") {
+        let peer = args.next().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "usage: hub keygen PEER PATH",
+            )
+        })?;
+        let path = args.next().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "usage: hub keygen PEER PATH",
+            )
+        })?;
+        let key = hub_protocol::SigningKey::generate(&peer)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        std::fs::write(&path, format!("{}\n", key.private_hex()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        println!("peer={peer}");
+        println!("key_id={}", key.key_id());
+        println!("public={}", key.public_hex());
+        return Ok(());
+    }
+    let addr = first
         .or_else(|| std::env::var("HUB_ADDR").ok())
         .unwrap_or_else(|| "127.0.0.1:15400".to_string());
 
@@ -78,9 +105,30 @@ async fn main() -> std::io::Result<()> {
             format!("HUB_NAME {name:?}: a name without `::`"),
         ));
     }
+    if let Ok(path) = std::env::var("HUB_TRUST_FILE") {
+        let trust = hub_protocol::TrustStore::from_file(path)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        hub = hub.with_auth_trust(trust);
+    }
+    let signing_key = std::env::var("HUB_PRIVATE_KEY_FILE")
+        .ok()
+        .map(|path| {
+            let peer = name.clone().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "HUB_PRIVATE_KEY_FILE requires HUB_NAME",
+                )
+            })?;
+            hub_protocol::SigningKey::from_private_file(peer, path)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
+        })
+        .transpose()?;
     let mut set = name
         .as_ref()
         .map_or_else(hub::Peers::default, |name| hub::Peers::new(name.clone()));
+    if let Some(key) = signing_key {
+        set = set.with_signing_key(key);
+    }
     if let Some(token) = &auth_token {
         set = set.with_auth_token(token.clone());
     }

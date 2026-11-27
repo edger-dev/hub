@@ -17,9 +17,9 @@ use hub_protocol::service::{
     PeerIngressDispatcher, SessionIngressDispatcher, SessionServiceClient,
 };
 use hub_protocol::{
-    AuthChallenge, AuthProof, ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink, PeerIngress, Registration,
-    RouteError, RoutedCall, RoutedReply, SessionInfo, SessionIngress, SessionMessage,
-    TopologyEvent, TopologySnapshot,
+    AuthChallenge, AuthProof, ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink,
+    PeerIngress, Registration, RouteError, RoutedCall, RoutedReply, SessionInfo, SessionIngress,
+    SessionMessage, TopologyEvent, TopologySnapshot,
 };
 use tokio::sync::{Mutex, watch};
 use vox::{ConnectionHandle, Link, Tx};
@@ -35,14 +35,20 @@ pub type ServedHub = Hub<NodeServiceClient>;
 #[derive(Clone)]
 struct ConnectionAuth {
     required: Option<Arc<str>>,
+    trust: hub_protocol::TrustStore,
     authenticated: Arc<AtomicBool>,
+    peer: Arc<Mutex<Option<String>>>,
+    challenges: Arc<Mutex<std::collections::BTreeMap<String, (std::time::Instant, AuthChallenge)>>>,
 }
 
 impl ConnectionAuth {
-    fn new(required: Option<Arc<str>>) -> Self {
+    fn new(required: Option<Arc<str>>, trust: hub_protocol::TrustStore) -> Self {
         Self {
-            authenticated: Arc::new(AtomicBool::new(required.is_none())),
+            authenticated: Arc::new(AtomicBool::new(required.is_none() && trust.is_empty())),
             required,
+            trust,
+            peer: Arc::new(Mutex::new(None)),
+            challenges: Arc::default(),
         }
     }
 
@@ -57,12 +63,55 @@ impl ConnectionAuth {
         }
     }
 
-    fn check(&self) -> Result<(), HubError> {
+    async fn challenge(&self, hub: &str, role: &str) -> Result<AuthChallenge, HubError> {
+        if self.trust.is_empty() {
+            return Err(HubError::Rejected(
+                "key authentication is not configured".into(),
+            ));
+        }
+        let challenge = AuthChallenge::new(hub, role).map_err(HubError::Rejected)?;
+        self.challenges.lock().await.insert(
+            role.to_string(),
+            (std::time::Instant::now(), challenge.clone()),
+        );
+        Ok(challenge)
+    }
+
+    async fn authenticate_key(&self, role: &str, proof: AuthProof) -> Result<(), HubError> {
+        let Some((issued, challenge)) = self.challenges.lock().await.remove(role) else {
+            return Err(HubError::Rejected(
+                "authentication challenge required".into(),
+            ));
+        };
+        if issued.elapsed() > std::time::Duration::from_secs(60) {
+            return Err(HubError::Rejected(
+                "authentication challenge expired".into(),
+            ));
+        }
+        let peer = self
+            .trust
+            .verify(&challenge, &proof)
+            .map_err(HubError::Rejected)?;
+        *self.peer.lock().await = Some(peer);
+        self.authenticated.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    async fn check(&self) -> Result<Option<String>, HubError> {
         if self.authenticated.load(Ordering::Acquire) {
-            Ok(())
+            Ok(self.peer.lock().await.clone())
         } else {
             Err(HubError::Rejected("authentication required".into()))
         }
+    }
+
+    async fn check_identity(&self, expected: &str) -> Result<(), HubError> {
+        if self.check().await?.is_some_and(|peer| peer != expected) {
+            return Err(HubError::Rejected(format!(
+                "authenticated peer cannot register {expected:?}"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -103,15 +152,17 @@ impl NodeIngress for NodeIngressHandler {
     }
 
     async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+        self.auth
+            .challenge(self.hub.peers().name().unwrap_or("unnamed"), "node")
+            .await
     }
 
-    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError> {
+        self.auth.authenticate_key("node", proof).await
     }
 
     async fn register(&self, registration: Registration) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check_identity(&registration.node.0).await?;
         // `::` names a peer hub's node: no node may take it.
         if registration.node.0.contains(hub_protocol::PEER_SEPARATOR) {
             return Err(HubError::Rejected(format!(
@@ -187,15 +238,17 @@ impl PeerIngress for PeerIngressHandler {
     }
 
     async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+        self.auth
+            .challenge(self.hub.peers().name().unwrap_or("unnamed"), "peer")
+            .await
     }
 
-    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError> {
+        self.auth.authenticate_key("peer", proof).await
     }
 
     async fn register(&self, peer: String) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check_identity(&peer).await?;
         let mut registered = self.registered.lock().await;
         match &*registered {
             ReverseRegistration::Closed => {
@@ -214,7 +267,19 @@ impl PeerIngress for PeerIngressHandler {
                 "could not open reverse ConsumerApi lane: {error:?}"
             ))
         })?;
-        if let Some(token) = self.hub.auth_token() {
+        if let Some(key) = self.hub.peers().signing_key() {
+            let challenge = client.authentication_challenge().await.map_err(|error| {
+                HubError::Rejected(format!(
+                    "reverse authentication challenge failed: {error:?}"
+                ))
+            })?;
+            let proof = key.sign(&challenge).map_err(HubError::Rejected)?;
+            client.authenticate_key(proof).await.map_err(|error| {
+                HubError::Rejected(format!(
+                    "could not authenticate reverse ConsumerApi lane: {error:?}"
+                ))
+            })?;
+        } else if let Some(token) = self.hub.auth_token() {
             client
                 .authenticate(token.to_string())
                 .await
@@ -266,15 +331,17 @@ impl SessionIngress for SessionIngressHandler {
     }
 
     async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+        self.auth
+            .challenge(self.hub.peers().name().unwrap_or("unnamed"), "session")
+            .await
     }
 
-    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError> {
+        self.auth.authenticate_key("session", proof).await
     }
 
     async fn register(&self, session: SessionInfo) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check_identity(&session.node).await?;
         let mut registered = self.registered.lock().await;
         match &*registered {
             SessionRegistration::Closed => {
@@ -399,28 +466,30 @@ impl ConsumerApi for ConsumerApiHandler {
     }
 
     async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+        self.auth
+            .challenge(self.hub.peers().name().unwrap_or("unnamed"), "consumer")
+            .await
     }
 
-    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
-        Err(HubError::Rejected("key authentication is not supported".into()))
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError> {
+        self.auth.authenticate_key("consumer", proof).await
     }
 
     async fn topology(&self) -> Result<TopologySnapshot, HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         let mut snapshot = self.hub.snapshot().await;
         snapshot.nodes.extend(self.hub.peers().nodes().await);
         Ok(snapshot)
     }
 
     async fn subscribe_topology(&self, events: Tx<TopologyEvent>) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         self.hub.subscribe(events).await;
         Ok(())
     }
 
     async fn publish(&self, event: hub_protocol::HubEvent) -> Result<u32, HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         // `hub/` topics are the hub's own word to its subscribers.
         if event.topic.starts_with("hub/") {
             return Err(HubError::Rejected(format!(
@@ -443,7 +512,7 @@ impl ConsumerApi for ConsumerApiHandler {
         prefix: String,
         events: Tx<hub_protocol::HubEvent>,
     ) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         // The channel streams within this call: hold the call open until the
         // subscriber is gone. While it lives, peers' own events are carried
         // here (one subscription per peer, shared by every subscriber).
@@ -454,12 +523,12 @@ impl ConsumerApi for ConsumerApiHandler {
     }
 
     async fn local_topology(&self) -> Result<TopologySnapshot, HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         Ok(self.hub.snapshot().await)
     }
 
     async fn sessions(&self) -> Result<Vec<hub_protocol::SessionInfo>, HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         let mut sessions = self.hub.local_sessions();
         sessions.extend(self.hub.peers().sessions().await);
         sessions.sort_by(|a, b| a.id.cmp(&b.id));
@@ -467,7 +536,7 @@ impl ConsumerApi for ConsumerApiHandler {
     }
 
     async fn local_sessions(&self) -> Result<Vec<hub_protocol::SessionInfo>, HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         Ok(self.hub.local_sessions())
     }
 
@@ -478,7 +547,7 @@ impl ConsumerApi for ConsumerApiHandler {
         message_id: String,
         body: String,
     ) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         let message = SessionMessage {
             id: message_id,
             from: self.session_sender().await?,
@@ -504,7 +573,7 @@ impl ConsumerApi for ConsumerApiHandler {
         target: String,
         message: hub_protocol::SessionMessage,
     ) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         Self::validate_message(&message)?;
         let peer = self.peer_name().await?;
         let prefix = format!("{peer}{}", hub_protocol::PEER_SEPARATOR);
@@ -531,7 +600,7 @@ impl ConsumerApi for ConsumerApiHandler {
         prefix: String,
         events: Tx<hub_protocol::HubEvent>,
     ) -> Result<(), HubError> {
-        self.auth.check()?;
+        self.auth.check().await?;
         let gone = self.hub.subscribe_local_events(prefix, events).await;
         let _ = gone.await;
         Ok(())
@@ -542,7 +611,7 @@ impl ConsumerApi for ConsumerApiHandler {
         target: LinkSelector,
         call: RoutedCall,
     ) -> Result<RoutedReply, RouteError> {
-        self.auth.check().map_err(RouteError::Hub)?;
+        self.auth.check().await.map_err(RouteError::Hub)?;
         // A peer hub's node goes one hop, its name stripped; this hub's own
         // name is just a longer way to say a local node.
         let target = match target.node.split_peer() {
@@ -594,7 +663,7 @@ impl ConsumerApi for ConsumerApiHandler {
 pub fn peer_consumer_acceptor(hub: &ServedHub, peer: &str) -> impl vox::LaneAcceptor {
     let handler = ConsumerApiHandler {
         hub: hub.clone(),
-        auth: ConnectionAuth::new(hub.auth_token()),
+        auth: ConnectionAuth::new(hub.auth_token(), hub.auth_trust()),
         session: None,
         peer: Some(ConsumerPeer::Configured(peer.to_string())),
     };
@@ -642,7 +711,7 @@ where
     let registered = Arc::new(Mutex::new(None));
     let registered_peer = Arc::new(Mutex::new(ReverseRegistration::Open(None)));
     let registered_session = Arc::new(Mutex::new(SessionRegistration::Open(None)));
-    let auth = ConnectionAuth::new(hub.auth_token());
+    let auth = ConnectionAuth::new(hub.auth_token(), hub.auth_trust());
 
     let node_handler = NodeIngressHandler {
         hub: hub.clone(),

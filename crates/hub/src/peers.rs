@@ -253,20 +253,41 @@ impl Peers {
                     let lane: Result<ConsumerApiClient, _> = handle.open_lane().await;
                     match lane {
                         Ok(client) => {
-                            let authenticated = match &peers.auth_token {
-                                Some(token) => client.authenticate(token.clone()).await.is_ok(),
-                                None => true,
+                            let authenticated = match &peers.signing_key {
+                                Some(key) => match client.authentication_challenge().await {
+                                    Ok(challenge) => match key.sign(&challenge) {
+                                        Ok(proof) => client.authenticate_key(proof).await.is_ok(),
+                                        Err(_) => false,
+                                    },
+                                    Err(_) => false,
+                                },
+                                None => match &peers.auth_token {
+                                    Some(token) => client.authenticate(token.clone()).await.is_ok(),
+                                    None => true,
+                                },
                             };
                             if authenticated {
                                 if let Some(local_name) = peers.name().map(str::to_owned)
                                     && let Ok(ingress) =
                                         handle.open_lane::<PeerIngressClient>().await
                                 {
-                                    let authenticated = match &peers.auth_token {
-                                        Some(token) => {
-                                            ingress.authenticate(token.clone()).await.is_ok()
-                                        }
-                                        None => true,
+                                    let authenticated = match &peers.signing_key {
+                                        Some(key) => match ingress.authentication_challenge().await
+                                        {
+                                            Ok(challenge) => match key.sign(&challenge) {
+                                                Ok(proof) => {
+                                                    ingress.authenticate_key(proof).await.is_ok()
+                                                }
+                                                Err(_) => false,
+                                            },
+                                            Err(_) => false,
+                                        },
+                                        None => match &peers.auth_token {
+                                            Some(token) => {
+                                                ingress.authenticate(token.clone()).await.is_ok()
+                                            }
+                                            None => true,
+                                        },
                                     };
                                     if authenticated {
                                         // Older peers and existing mutual configurations

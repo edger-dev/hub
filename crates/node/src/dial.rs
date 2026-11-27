@@ -86,7 +86,20 @@ where
         .await
         .map_err(|e| DialError::OpenIngress(format!("{e:?}")))?;
 
-    if let Some(token) = &config.auth_token {
+    if let Some(key) = &config.signing_key {
+        let challenge = hub.authentication_challenge().await.map_err(|e| match e {
+            vox::VoxError::User(hub_error) => DialError::Rejected(*hub_error),
+            other => DialError::RegisterTransport(format!("{other:?}")),
+        })?;
+        let proof = key
+            .sign(&challenge)
+            .map_err(hub_protocol::HubError::Rejected)
+            .map_err(DialError::Rejected)?;
+        hub.authenticate_key(proof).await.map_err(|e| match e {
+            vox::VoxError::User(hub_error) => DialError::Rejected(*hub_error),
+            other => DialError::RegisterTransport(format!("{other:?}")),
+        })?;
+    } else if let Some(token) = &config.auth_token {
         hub.authenticate(token.clone()).await.map_err(|e| match e {
             vox::VoxError::User(hub_error) => DialError::Rejected(*hub_error),
             other => DialError::RegisterTransport(format!("{other:?}")),
