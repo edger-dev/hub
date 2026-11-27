@@ -1,0 +1,2 @@
+{"@schema":"kinora-commit-archive-v1"}
+{"event_kind":"store","kind":"markdown","id":"0c8154a9705d32e7755f1fdbd4cb30bbf3150d28cc0e961c7553b54d15890f2b","hash":"bd6ac42fe5e75451450c5183ae1892b19f92c718138de69e222e428197d940bd","parents":["0c8154a9705d32e7755f1fdbd4cb30bbf3150d28cc0e961c7553b54d15890f2b"],"ts":"2026-11-27T13:25:20.801880765Z","author":"YJ Park","provenance":"kimi-code","metadata":{"name":"hub::spec::connection-auth"}}
