@@ -304,3 +304,20 @@ its local mailbox. Hubs forward to peers with `forward_session`, which accepts
 only the origin prefix belonging to the authenticated peer. Unknown or offline
 sessions fail visibly. Messages are live-only: the hub retains no offline queue
 or history, and multi-hop targets are refused.
+
+## Structured session diagnostics
+
+`DiagnosticsApi` uses the same token or signed consumer authentication as
+`ConsumerApi`. `capabilities` reports protocol support, `peer_diagnostics`
+reports each peer's direction, registration generation, and current state, and
+`session_probe` checks a local or one-hop target without changing its mailbox.
+Reports carry a probe id, timestamp, source, target, elapsed time, and staged
+`ok`, `failed`, `unsupported`, and `unknown` checks. Older hubs and shims are
+`unsupported`, not offline. A session listing is a registration snapshot, not
+proof of reachability.
+
+`SessionService.ping` checks callback responsiveness only; it does not prove
+mailbox admission. `kudo-shim doctor <session-id>` renders the same report from
+a consumer-only connection without registering another session. The public
+`/healthz` endpoint remains a shallow listener check and exposes none of this
+metadata.

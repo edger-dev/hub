@@ -224,7 +224,15 @@ impl Peers {
                 .find(|existing| existing.name == peer)
                 .and_then(|existing| existing.handle.clone())
         })?;
-        handle.open_lane().await.ok()
+        let client: DiagnosticsApiClient = handle.open_lane().await.ok()?;
+        if let Some(key) = &self.signing_key {
+            let challenge = client.authentication_challenge().await.ok()?;
+            let proof = key.sign(&challenge).ok()?;
+            client.authenticate_key(proof).await.ok()?;
+        } else if let Some(token) = &self.auth_token {
+            client.authenticate(token.clone()).await.ok()?;
+        }
+        Some(client)
     }
 
     /// Clear a reverse registration only if its connection is still current.
