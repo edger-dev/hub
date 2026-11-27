@@ -17,7 +17,7 @@ use hub_protocol::service::{
     PeerIngressDispatcher, SessionIngressDispatcher, SessionServiceClient,
 };
 use hub_protocol::{
-    ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink, PeerIngress, Registration,
+    AuthChallenge, AuthProof, ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink, PeerIngress, Registration,
     RouteError, RoutedCall, RoutedReply, SessionInfo, SessionIngress, SessionMessage,
     TopologyEvent, TopologySnapshot,
 };
@@ -102,6 +102,14 @@ impl NodeIngress for NodeIngressHandler {
         self.auth.authenticate(token)
     }
 
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
+    }
+
+    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
+    }
+
     async fn register(&self, registration: Registration) -> Result<(), HubError> {
         self.auth.check()?;
         // `::` names a peer hub's node: no node may take it.
@@ -178,6 +186,14 @@ impl PeerIngress for PeerIngressHandler {
         self.auth.authenticate(token)
     }
 
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
+    }
+
+    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
+    }
+
     async fn register(&self, peer: String) -> Result<(), HubError> {
         self.auth.check()?;
         let mut registered = self.registered.lock().await;
@@ -247,6 +263,14 @@ impl SessionIngressHandler {
 impl SessionIngress for SessionIngressHandler {
     async fn authenticate(&self, token: String) -> Result<(), HubError> {
         self.auth.authenticate(token)
+    }
+
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
+    }
+
+    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
     }
 
     async fn register(&self, session: SessionInfo) -> Result<(), HubError> {
@@ -372,6 +396,14 @@ impl ConsumerApiHandler {
 impl ConsumerApi for ConsumerApiHandler {
     async fn authenticate(&self, token: String) -> Result<(), HubError> {
         self.auth.authenticate(token)
+    }
+
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
+    }
+
+    async fn authenticate_key(&self, _proof: AuthProof) -> Result<(), HubError> {
+        Err(HubError::Rejected("key authentication is not supported".into()))
     }
 
     async fn topology(&self) -> Result<TopologySnapshot, HubError> {

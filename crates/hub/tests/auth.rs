@@ -2,7 +2,7 @@
 
 use hub::{HubListener, ServedHub};
 use hub_protocol::service::{ConsumerApiClient, PeerIngressClient, SessionIngressClient};
-use hub_protocol::{LinkLabel, NodeId, SessionInfo};
+use hub_protocol::{LinkLabel, NodeId, SessionInfo, SigningKey, TrustStore};
 use node::{HubEndpoint, NodeConfig};
 
 async fn consumer(addr: &str) -> ConsumerApiClient {
@@ -100,4 +100,54 @@ async fn nodes_authenticate_before_registering() {
     .await
     .unwrap();
     drop(connection);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn signed_auth_binds_identity_and_rejects_replay() {
+    let key = SigningKey::generate("yolo").unwrap();
+    let mut trust = TrustStore::default();
+    trust
+        .add("yolo", &key.public_hex(), &["consumer", "session"])
+        .unwrap();
+    let listener = HubListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().to_string();
+    let hub = ServedHub::new()
+        .with_auth_trust(trust)
+        .with_peers(hub::Peers::new("hub"));
+    let _server = tokio::spawn(listener.serve(hub));
+
+    let consumer = consumer(&addr).await;
+    assert!(consumer.topology().await.is_err());
+    let challenge = consumer.authentication_challenge().await.unwrap();
+    let proof = key.sign(&challenge).unwrap();
+    consumer.authenticate_key(proof.clone()).await.unwrap();
+    consumer.topology().await.unwrap();
+    assert!(consumer.authenticate_key(proof).await.is_err());
+
+    let socket = tokio::net::TcpStream::connect(&addr).await.unwrap();
+    let connection = vox::initiator_on(vox::transport::tcp::StreamLink::tcp(socket))
+        .establish_connection()
+        .await
+        .unwrap();
+    let session: SessionIngressClient = connection.open_lane().await.unwrap();
+    let challenge = session.authentication_challenge().await.unwrap();
+    session
+        .authenticate_key(key.sign(&challenge).unwrap())
+        .await
+        .unwrap();
+    let info = SessionInfo {
+        id: "session-a".into(),
+        node: "other".into(),
+        harness: "test".into(),
+        workspace: "/work".into(),
+        context: None,
+    };
+    assert!(session.register(info.clone()).await.is_err());
+    session
+        .register(SessionInfo {
+            node: "yolo".into(),
+            ..info
+        })
+        .await
+        .unwrap();
 }

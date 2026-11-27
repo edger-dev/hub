@@ -22,6 +22,7 @@
 
 use vox::Tx;
 
+use crate::auth::{AuthChallenge, AuthProof};
 use crate::discovery::{TopologyEvent, TopologySnapshot};
 use crate::errors::{HubError, NodeError, RouteError};
 use crate::events::HubEvent;
@@ -48,6 +49,12 @@ pub trait NodeIngress {
     /// Authenticate this connection before any other operation.
     async fn authenticate(&self, token: String) -> Result<(), HubError>;
 
+    /// Issue a fresh challenge for per-peer key authentication.
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError>;
+
+    /// Authenticate this connection with a signed challenge.
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError>;
+
     /// A reverse-dialing link announces itself and its connectors (§2.1, §2.4).
     ///
     /// Re-registration by a known `(node, link)` is an expected reconnect, not an
@@ -62,6 +69,12 @@ pub trait PeerIngress {
     /// Authenticate this connection before any other operation.
     async fn authenticate(&self, token: String) -> Result<(), HubError>;
 
+    /// Issue a fresh challenge for per-peer key authentication.
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError>;
+
+    /// Authenticate this connection with a signed challenge.
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError>;
+
     /// Announce the dialing hub's name and offer a reverse consumer lane.
     async fn register(&self, peer: String) -> Result<(), HubError>;
 }
@@ -73,6 +86,12 @@ pub trait SessionIngress {
     /// Authenticate this connection before any other operation.
     async fn authenticate(&self, token: String) -> Result<(), HubError>;
 
+    /// Issue a fresh challenge for per-peer key authentication.
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError>;
+
+    /// Authenticate this connection with a signed challenge.
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError>;
+
     /// Register this connection's one session and its reverse delivery lane.
     async fn register(&self, session: SessionInfo) -> Result<(), HubError>;
 }
@@ -82,6 +101,12 @@ pub trait SessionIngress {
 pub trait ConsumerApi {
     /// Authenticate this connection before any other operation.
     async fn authenticate(&self, token: String) -> Result<(), HubError>;
+
+    /// Issue a fresh challenge for per-peer key authentication.
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError>;
+
+    /// Authenticate this connection with a signed challenge.
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError>;
 
     /// A point-in-time view of the connected mesh (§2.6).
     ///

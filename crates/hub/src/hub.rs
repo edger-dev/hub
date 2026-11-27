@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use hub_protocol::{HubError, LinkSelector, NodeLink, Registration, TopologySnapshot};
+use hub_protocol::{HubError, LinkSelector, NodeLink, Registration, TopologySnapshot, TrustStore};
 use tokio::sync::Mutex;
 use vox::Tx;
 
@@ -28,6 +28,7 @@ pub struct Hub<T> {
     peers: Peers,
     sessions: Sessions,
     auth_token: Option<std::sync::Arc<str>>,
+    auth_trust: TrustStore,
 }
 
 struct Inner<T> {
@@ -43,6 +44,7 @@ impl<T> Clone for Hub<T> {
             peers: self.peers.clone(),
             sessions: self.sessions.clone(),
             auth_token: self.auth_token.clone(),
+            auth_trust: self.auth_trust.clone(),
         }
     }
 }
@@ -65,6 +67,7 @@ impl<T: Clone> Hub<T> {
             peers: Peers::default(),
             sessions: Sessions::default(),
             auth_token: None,
+            auth_trust: TrustStore::default(),
         }
     }
 
@@ -77,6 +80,17 @@ impl<T: Clone> Hub<T> {
     /// The credential required of inbound connections, when one is configured.
     pub fn auth_token(&self) -> Option<Arc<str>> {
         self.auth_token.clone()
+    }
+
+    /// Trust these public keys on inbound connections.
+    pub fn with_auth_trust(mut self, trust: TrustStore) -> Self {
+        self.auth_trust = trust;
+        self
+    }
+
+    /// Public keys trusted on inbound connections.
+    pub fn auth_trust(&self) -> TrustStore {
+        self.auth_trust.clone()
     }
 
     /// This hub, named and peered by `peers`; events carried from a peer
