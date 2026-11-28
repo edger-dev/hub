@@ -329,7 +329,7 @@ impl SessionIngressHandler {
     }
 }
 
-// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@b6936c5b4bf599c582c8c986e716b9a763d5df72b5a8594423bdc25a94092501
+// implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@7ce52c42b71efc012dae8b790d4910cf81f811bdb6354dc6e2a40cde6b511ebc
 impl SessionIngress for SessionIngressHandler {
     async fn authenticate(&self, token: String) -> Result<(), HubError> {
         self.auth.authenticate(token)
@@ -570,7 +570,7 @@ impl ConsumerApi for ConsumerApiHandler {
         Ok(self.hub.local_sessions())
     }
 
-    // implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@b6936c5b4bf599c582c8c986e716b9a763d5df72b5a8594423bdc25a94092501
+    // implements: 396fba0cab2ac48f5fdf59a3258f377fc04aa9c6d7f42d27f4be9b1eafcb8b38@7ce52c42b71efc012dae8b790d4910cf81f811bdb6354dc6e2a40cde6b511ebc
     async fn send_session(
         &self,
         target: String,

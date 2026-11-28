@@ -316,6 +316,10 @@ Reports carry a probe id, timestamp, source, target, elapsed time, and staged
 `unsupported`, not offline. A session listing is a registration snapshot, not
 proof of reachability.
 
+Forwarded probes also exercise origin-peer admission. A configured peer can use
+its proven key identity even when a reverse registration is stale or
+unavailable; a shared token alone does not prove that identity.
+
 `SessionService.ping` checks callback responsiveness only; it does not prove
 mailbox admission. `kudo-shim doctor <session-id>` renders the same report from
 a consumer-only connection without registering another session. The public
