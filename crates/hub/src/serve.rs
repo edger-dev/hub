@@ -194,7 +194,8 @@ impl NodeIngress for NodeIngressHandler {
     }
 }
 
-enum ReverseRegistration {
+#[derive(Clone)]
+pub(crate) enum ReverseRegistration {
     Open(Option<(String, u64)>),
     Closed,
 }
@@ -205,7 +206,7 @@ enum SessionRegistration {
 }
 
 #[derive(Clone)]
-enum ConsumerPeer {
+pub(crate) enum ConsumerPeer {
     Registered(Arc<Mutex<ReverseRegistration>>),
     Configured(String),
 }
@@ -377,6 +378,44 @@ struct ConsumerApiHandler {
     peer: Option<ConsumerPeer>,
 }
 
+pub(crate) async fn authenticated_peer_name(
+    hub: &ServedHub,
+    auth: &ConnectionAuth,
+    peer: Option<&ConsumerPeer>,
+) -> Result<String, HubError> {
+    match peer {
+        Some(ConsumerPeer::Configured(name)) => Ok(name.clone()),
+        Some(ConsumerPeer::Registered(registration)) => match &*registration.lock().await {
+            ReverseRegistration::Open(Some((name, generation)))
+                if hub.peers().reverse_is_current(name, *generation) =>
+            {
+                Ok(name.clone())
+            }
+            ReverseRegistration::Open(Some((name, _)))
+                if hub.peers().is_configured(name)
+                    && auth.check().await?.as_deref() == Some(name) =>
+            {
+                Ok(name.clone())
+            }
+            ReverseRegistration::Open(Some(_)) => {
+                Err(HubError::Rejected("peer registration is not live".into()))
+            }
+            ReverseRegistration::Open(None) => match auth.check().await? {
+                Some(name) if hub.peers().is_configured(&name) => Ok(name),
+                _ => Err(HubError::Rejected(
+                    "this connection has no registered peer".into(),
+                )),
+            },
+            ReverseRegistration::Closed => {
+                Err(HubError::Rejected("peer connection is closed".into()))
+            }
+        },
+        None => Err(HubError::Rejected(
+            "this connection has no registered peer".into(),
+        )),
+    }
+}
+
 impl ConsumerApiHandler {
     async fn session_sender(&self) -> Result<SessionInfo, HubError> {
         let Some(session) = &self.session else {
@@ -397,20 +436,7 @@ impl ConsumerApiHandler {
     }
 
     async fn peer_name(&self) -> Result<String, HubError> {
-        match self.peer.as_ref() {
-            Some(ConsumerPeer::Configured(name)) => Ok(name.clone()),
-            Some(ConsumerPeer::Registered(registration)) => match &*registration.lock().await {
-                ReverseRegistration::Open(Some((name, generation)))
-                    if self.hub.peers().reverse_is_current(name, *generation) =>
-                {
-                    Ok(name.clone())
-                }
-                _ => Err(HubError::Rejected("peer registration is not live".into())),
-            },
-            None => Err(HubError::Rejected(
-                "this connection has no registered peer".into(),
-            )),
-        }
+        authenticated_peer_name(&self.hub, &self.auth, self.peer.as_ref()).await
     }
 
     fn validate_message(message: &SessionMessage) -> Result<(), HubError> {
@@ -671,14 +697,24 @@ pub fn peer_consumer_acceptor(hub: &ServedHub, peer: &str) -> impl vox::LaneAcce
         session: None,
         peer: Some(ConsumerPeer::Configured(peer.to_string())),
     };
+    let diagnostics_handler = crate::diagnostics::DiagnosticsApiHandler::new(
+        hub.clone(),
+        Some(ConsumerPeer::Configured(peer.to_string())),
+    );
     vox::lane_acceptor_fn(move |request: &vox::LaneRequest, lane: vox::PendingLane| {
-        if request.service() != "ConsumerApi" {
-            return Err(vox::LaneRejection::new(
+        match request.service() {
+            "ConsumerApi" => {
+                lane.handle_with(ConsumerApiDispatcher::new(handler.clone()));
+                Ok(())
+            }
+            "DiagnosticsApi" => {
+                lane.handle_with(DiagnosticsApiDispatcher::new(diagnostics_handler.clone()));
+                Ok(())
+            }
+            _ => Err(vox::LaneRejection::new(
                 vox::LaneRejectReason::UnknownService,
-            ));
+            )),
         }
-        lane.handle_with(ConsumerApiDispatcher::new(handler.clone()));
-        Ok(())
     })
 }
 
@@ -741,7 +777,10 @@ where
         session: Some(Arc::clone(&registered_session)),
         peer: Some(ConsumerPeer::Registered(Arc::clone(&registered_peer))),
     };
-    let diagnostics_handler = crate::diagnostics::DiagnosticsApiHandler::new(hub.clone());
+    let diagnostics_handler = crate::diagnostics::DiagnosticsApiHandler::new(
+        hub.clone(),
+        Some(ConsumerPeer::Registered(Arc::clone(&registered_peer))),
+    );
 
     let acceptor = vox::lane_acceptor_fn(
         move |request: &vox::LaneRequest,

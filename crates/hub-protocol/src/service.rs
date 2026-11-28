@@ -246,7 +246,7 @@ mod tests {
 }
 
 /// Authenticated diagnostic introspection and real session probes.
-// implements: hub::spec::session-diagnostics@0ed7d0e7b10814c751b8b3303cb9572a2f0b34b7c0047b49ac805c19d0e55033
+// implements: hub::spec::session-diagnostics@4f1da10173d44802ad14da7601334b7b7ea94d10d69dc30e5ee2a8435e320c4e
 #[vox::service]
 pub trait DiagnosticsApi {
     async fn authenticate(&self, token: String) -> Result<(), HubError>;
@@ -256,6 +256,12 @@ pub trait DiagnosticsApi {
     async fn capabilities(&self) -> Result<DiagnosticCapabilities, HubError>;
     async fn peer_diagnostics(&self) -> Result<Vec<PeerDiagnostic>, HubError>;
     async fn session_probe(
+        &self,
+        target: String,
+        probe_id: String,
+    ) -> Result<DiagnosticReport, HubError>;
+
+    async fn forward_session_probe(
         &self,
         target: String,
         probe_id: String,

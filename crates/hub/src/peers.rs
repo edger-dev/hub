@@ -396,6 +396,14 @@ impl Peers {
         Ok(())
     }
 
+    pub(crate) fn is_configured(&self, peer: &str) -> bool {
+        self.with(|peers| {
+            peers
+                .iter()
+                .any(|existing| existing.name == peer && existing.configured)
+        })
+    }
+
     /// The peers' names, in the order they were added.
     pub fn names(&self) -> Vec<String> {
         self.with(|peers| peers.iter().map(|p| p.name.clone()).collect())

@@ -1,6 +1,6 @@
 //! Authenticated live diagnostics and session probes.
 
-// implements: hub::spec::session-diagnostics@0ed7d0e7b10814c751b8b3303cb9572a2f0b34b7c0047b49ac805c19d0e55033
+// implements: hub::spec::session-diagnostics@4f1da10173d44802ad14da7601334b7b7ea94d10d69dc30e5ee2a8435e320c4e
 
 use hub_protocol::service::DiagnosticsApi;
 use hub_protocol::{
@@ -8,18 +8,19 @@ use hub_protocol::{
     DiagnosticStatus, HubError, PeerDiagnostic,
 };
 
-use crate::serve::{ConnectionAuth, ServedHub};
+use crate::serve::{ConnectionAuth, ConsumerPeer, ServedHub, authenticated_peer_name};
 
 #[derive(Clone)]
 pub(crate) struct DiagnosticsApiHandler {
     hub: ServedHub,
     auth: ConnectionAuth,
+    peer: Option<ConsumerPeer>,
 }
 
 impl DiagnosticsApiHandler {
-    pub(crate) fn new(hub: ServedHub) -> Self {
+    pub(crate) fn new(hub: ServedHub, peer: Option<ConsumerPeer>) -> Self {
         let auth = ConnectionAuth::new(hub.auth_token(), hub.auth_trust());
-        Self { hub, auth }
+        Self { hub, auth, peer }
     }
 
     fn report(&self, probe_id: String, target: String) -> DiagnosticReport {
@@ -108,7 +109,10 @@ impl DiagnosticsApi for DiagnosticsApiHandler {
                 status: DiagnosticStatus::Ok,
                 detail: format!("peer {peer:?} is live"),
             });
-            match client.session_probe(local.to_string(), probe_id).await {
+            match client
+                .forward_session_probe(local.to_string(), probe_id)
+                .await
+            {
                 Ok(mut remote) => {
                     remote.target = target;
                     remote.checks.splice(0..0, report.checks);
@@ -161,5 +165,36 @@ impl DiagnosticsApi for DiagnosticsApiHandler {
             });
         }
         Ok(self.complete(started, report))
+    }
+
+    async fn forward_session_probe(
+        &self,
+        target: String,
+        probe_id: String,
+    ) -> Result<DiagnosticReport, HubError> {
+        self.auth.check().await?;
+        let started = std::time::Instant::now();
+        let mut report = self.report(probe_id.clone(), target.clone());
+        let peer = match authenticated_peer_name(&self.hub, &self.auth, self.peer.as_ref()).await {
+            Ok(peer) => peer,
+            Err(error) => {
+                report.checks.push(DiagnosticCheck {
+                    stage: "forwarding".into(),
+                    status: DiagnosticStatus::Failed,
+                    detail: format!("{error:?}"),
+                });
+                return Ok(self.complete(started, report));
+            }
+        };
+        let mut report = self.session_probe(target, probe_id).await?;
+        report.checks.insert(
+            0,
+            DiagnosticCheck {
+                stage: "forwarding".into(),
+                status: DiagnosticStatus::Ok,
+                detail: format!("origin peer {peer:?} is admitted"),
+            },
+        );
+        Ok(report.finish())
     }
 }
