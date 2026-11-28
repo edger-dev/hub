@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use hub_protocol::service::{ConsumerApiClient, DiagnosticsApiClient, PeerIngressClient};
+use hub_protocol::service::{ConsumerApiClient, ForwardedDiagnosticsApiClient, PeerIngressClient};
 use hub_protocol::{
     DiagnosticStatus, HubEvent, NodeInfo, PEER_SEPARATOR, PeerDiagnostic, SessionInfo,
     TopologySnapshot,
@@ -221,7 +221,7 @@ impl Peers {
     pub(crate) async fn diagnostics_client(
         &self,
         peer: &str,
-    ) -> Result<DiagnosticsApiClient, (DiagnosticStatus, String)> {
+    ) -> Result<ForwardedDiagnosticsApiClient, (DiagnosticStatus, String)> {
         let Some(handle) = self.with(|peers| {
             peers
                 .iter()
@@ -233,7 +233,7 @@ impl Peers {
                 format!("peer {peer:?} is not live"),
             ));
         };
-        let client: DiagnosticsApiClient = handle.open_lane().await.map_err(|error| {
+        let client: ForwardedDiagnosticsApiClient = handle.open_lane().await.map_err(|error| {
             (
                 DiagnosticStatus::Unsupported,
                 format!("DiagnosticsApi is unsupported: {error:?}"),

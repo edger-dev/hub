@@ -35,8 +35,8 @@ pub use identity::{LinkLabel, NodeId, NodeLink, PEER_SEPARATOR};
 pub use registration::Registration;
 pub use routing::{RoutedCall, RoutedReply};
 pub use service::{
-    ConsumerApi, DiagnosticsApi, NodeIngress, NodeService, PeerIngress, Pong, SessionIngress,
-    SessionService,
+    ConsumerApi, DiagnosticsApi, ForwardedDiagnosticsApi, NodeIngress, NodeService, PeerIngress,
+    Pong, SessionIngress, SessionService,
 };
 pub use session::{MAX_SESSION_MESSAGE_BYTES, SessionInfo, SessionMessage};
 pub use targeting::LinkSelector;

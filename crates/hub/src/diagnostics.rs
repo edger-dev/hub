@@ -2,7 +2,7 @@
 
 // implements: hub::spec::session-diagnostics@4f1da10173d44802ad14da7601334b7b7ea94d10d69dc30e5ee2a8435e320c4e
 
-use hub_protocol::service::DiagnosticsApi;
+use hub_protocol::service::{DiagnosticsApi, ForwardedDiagnosticsApi};
 use hub_protocol::{
     AuthChallenge, AuthProof, DiagnosticCapabilities, DiagnosticCheck, DiagnosticReport,
     DiagnosticStatus, HubError, PeerDiagnostic,
@@ -109,10 +109,7 @@ impl DiagnosticsApi for DiagnosticsApiHandler {
                 status: DiagnosticStatus::Ok,
                 detail: format!("peer {peer:?} is live"),
             });
-            match client
-                .forward_session_probe(local.to_string(), probe_id)
-                .await
-            {
+            match client.session_probe(local.to_string(), probe_id).await {
                 Ok(mut remote) => {
                     remote.target = target;
                     remote.checks.splice(0..0, report.checks);
@@ -166,8 +163,24 @@ impl DiagnosticsApi for DiagnosticsApiHandler {
         }
         Ok(self.complete(started, report))
     }
+}
 
-    async fn forward_session_probe(
+impl ForwardedDiagnosticsApi for DiagnosticsApiHandler {
+    async fn authenticate(&self, token: String) -> Result<(), HubError> {
+        self.auth.authenticate(token)
+    }
+
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError> {
+        self.auth
+            .challenge(self.hub.peers().name().unwrap_or("unnamed"), "consumer")
+            .await
+    }
+
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError> {
+        self.auth.authenticate_key("consumer", proof).await
+    }
+
+    async fn session_probe(
         &self,
         target: String,
         probe_id: String,
@@ -186,7 +199,7 @@ impl DiagnosticsApi for DiagnosticsApiHandler {
                 return Ok(self.complete(started, report));
             }
         };
-        let mut report = self.session_probe(target, probe_id).await?;
+        let mut report = DiagnosticsApi::session_probe(self, target, probe_id).await?;
         report.checks.insert(
             0,
             DiagnosticCheck {

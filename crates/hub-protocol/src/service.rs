@@ -260,8 +260,17 @@ pub trait DiagnosticsApi {
         target: String,
         probe_id: String,
     ) -> Result<DiagnosticReport, HubError>;
+}
 
-    async fn forward_session_probe(
+/// Forwarded session probes with origin-peer admission.
+// implements: hub::spec::session-diagnostics@4f1da10173d44802ad14da7601334b7b7ea94d10d69dc30e5ee2a8435e320c4e
+#[vox::service]
+pub trait ForwardedDiagnosticsApi {
+    async fn authenticate(&self, token: String) -> Result<(), HubError>;
+    async fn authentication_challenge(&self) -> Result<AuthChallenge, HubError>;
+    async fn authenticate_key(&self, proof: AuthProof) -> Result<(), HubError>;
+
+    async fn session_probe(
         &self,
         target: String,
         probe_id: String,

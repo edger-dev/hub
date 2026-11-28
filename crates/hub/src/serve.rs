@@ -13,8 +13,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use hub_protocol::service::{
-    ConsumerApiClient, ConsumerApiDispatcher, DiagnosticsApiDispatcher, NodeIngressDispatcher,
-    NodeServiceClient, PeerIngressDispatcher, SessionIngressDispatcher, SessionServiceClient,
+    ConsumerApiClient, ConsumerApiDispatcher, DiagnosticsApiDispatcher,
+    ForwardedDiagnosticsApiDispatcher, NodeIngressDispatcher, NodeServiceClient,
+    PeerIngressDispatcher, SessionIngressDispatcher, SessionServiceClient,
 };
 use hub_protocol::{
     AuthChallenge, AuthProof, ConsumerApi, HubError, LinkSelector, NodeIngress, NodeLink,
@@ -707,6 +708,12 @@ pub fn peer_consumer_acceptor(hub: &ServedHub, peer: &str) -> impl vox::LaneAcce
                 lane.handle_with(ConsumerApiDispatcher::new(handler.clone()));
                 Ok(())
             }
+            "ForwardedDiagnosticsApi" => {
+                lane.handle_with(ForwardedDiagnosticsApiDispatcher::new(
+                    diagnostics_handler.clone(),
+                ));
+                Ok(())
+            }
             "DiagnosticsApi" => {
                 lane.handle_with(DiagnosticsApiDispatcher::new(diagnostics_handler.clone()));
                 Ok(())
@@ -801,6 +808,12 @@ where
                 }
                 "ConsumerApi" => {
                     lane.handle_with(ConsumerApiDispatcher::new(consumer_handler.clone()));
+                    Ok(())
+                }
+                "ForwardedDiagnosticsApi" => {
+                    lane.handle_with(ForwardedDiagnosticsApiDispatcher::new(
+                        diagnostics_handler.clone(),
+                    ));
                     Ok(())
                 }
                 "DiagnosticsApi" => {
